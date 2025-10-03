@@ -2,7 +2,7 @@
 
 import { Badge, Button, Text, TextArea, Callout } from '@radix-ui/themes'
 import { Play, AlertCircle } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useEditorStore } from '@/lib/state'
 import { translateWithGoogle, TranslationAPIError } from '@/utils/translation'
 
@@ -11,6 +11,9 @@ function TranslationPanel() {
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
+  const [editingBlock, setEditingBlock] = useState<number | null>(null)
+  const [editValue, setEditValue] = useState('')
+  const autosaveTimeout = useRef<NodeJS.Timeout | null>(null)
 
   const translate = async () => {
     // Check for API key
@@ -79,11 +82,56 @@ function TranslationPanel() {
     }
   }
 
+  const handleEditChange = (index: number, value: string) => {
+    setEditValue(value)
+
+    // Clear existing timeout
+    if (autosaveTimeout.current) {
+      clearTimeout(autosaveTimeout.current)
+    }
+
+    // Set new timeout for autosave (500ms after user stops typing)
+    autosaveTimeout.current = setTimeout(() => {
+      const updated = [...textBlocks]
+      updated[index] = { ...updated[index], translatedText: value }
+      setTextBlocks(updated)
+      console.log(`Autosaved translation for block ${index + 1}`)
+    }, 500)
+  }
+
+  const startEditing = (index: number) => {
+    setEditingBlock(index)
+    setEditValue(textBlocks[index].translatedText || '')
+  }
+
+  const finishEditing = () => {
+    // Clear timeout and save immediately
+    if (autosaveTimeout.current) {
+      clearTimeout(autosaveTimeout.current)
+    }
+    if (editingBlock !== null) {
+      const updated = [...textBlocks]
+      updated[editingBlock] = { ...updated[editingBlock], translatedText: editValue }
+      setTextBlocks(updated)
+    }
+    setEditingBlock(null)
+    setEditValue('')
+  }
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (autosaveTimeout.current) {
+        clearTimeout(autosaveTimeout.current)
+      }
+    }
+  }, [])
+
   return (
-    <div className='flex max-h-[800px] w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md'>
+    <div className='flex max-h-[800px] w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md dark:border-gray-700 dark:bg-gray-800'>
       {/* Header */}
       <div className='flex items-center p-3'>
-        <h2 className='font-medium'>Translation</h2>
+        <h2 className='font-medium dark:text-white'>Translation</h2>
         <div className='flex-grow'></div>
         <Button onClick={translate} loading={loading} variant='soft' disabled={!translationApiKey}>
           <Play className='h-4 w-4' />
@@ -105,7 +153,7 @@ function TranslationPanel() {
       {/* Progress display */}
       {progress && loading && (
         <div className='px-4 py-2'>
-          <Text className='text-sm text-gray-600'>{progress}</Text>
+          <Text className='text-sm text-gray-600 dark:text-gray-400'>{progress}</Text>
         </div>
       )}
 
@@ -123,24 +171,41 @@ function TranslationPanel() {
         {textBlocks.map((block, index) => (
           <div
             key={index}
-            className='border-b border-gray-200 px-4 py-2 text-sm last:border-b-0'
+            className='border-b border-gray-200 px-4 py-2 text-sm last:border-b-0 dark:border-gray-700'
           >
             <div className='mb-1 flex items-center gap-2'>
               <Badge>{index + 1}</Badge>
               {block.text && !block.translatedText && (
-                <Text className='text-xs text-gray-500'>Not translated yet</Text>
+                <Text className='text-xs text-gray-500 dark:text-gray-400'>Not translated yet</Text>
               )}
             </div>
             {block.text && (
               <div className='space-y-1'>
                 <div>
-                  <Text className='text-xs font-semibold text-gray-600'>Original:</Text>
-                  <Text className='text-sm'>{block.text}</Text>
+                  <Text className='text-xs font-semibold text-gray-600 dark:text-gray-400'>Original:</Text>
+                  <Text className='text-sm dark:text-gray-200'>{block.text}</Text>
                 </div>
                 {block.translatedText && (
                   <div>
-                    <Text className='text-xs font-semibold text-gray-600'>Translation:</Text>
-                    <Text className='text-sm font-medium'>{block.translatedText}</Text>
+                    <Text className='text-xs font-semibold text-gray-600 dark:text-gray-400'>Translation:</Text>
+                    {editingBlock === index ? (
+                      <TextArea
+                        value={editValue}
+                        onChange={(e) => handleEditChange(index, e.target.value)}
+                        onBlur={finishEditing}
+                        autoFocus
+                        rows={3}
+                        className='w-full'
+                      />
+                    ) : (
+                      <div
+                        onClick={() => startEditing(index)}
+                        className='cursor-pointer rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-700'
+                        title='Click to edit'
+                      >
+                        <Text className='text-sm font-medium dark:text-gray-100'>{block.translatedText}</Text>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

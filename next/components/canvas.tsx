@@ -15,7 +15,7 @@ import ScaleControl from './scale-control'
 import { useEditorStore } from '@/lib/state'
 
 function Canvas() {
-  const { tool, scale, image, textBlocks, inpaintedImage } = useEditorStore()
+  const { tool, scale, image, textBlocks, inpaintedImage, selectedBlockIndex, setSelectedBlockIndex } = useEditorStore()
   const containerRef = useRef<HTMLDivElement>(null)
   const inpaintLayerRef = useRef<Konva.Layer>(null)
 
@@ -86,7 +86,7 @@ function Canvas() {
                         height={height}
                         text={block.translatedText}
                         fontSize={block.fontSize}
-                        fontFamily='Arial'
+                        fontFamily={block.fontFamily || 'Arial'}
                         fill={`rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`}
                         align='center'
                         verticalAlign='middle'
@@ -113,10 +113,11 @@ function Canvas() {
                           y={ymin}
                           width={width}
                           height={height}
-                          stroke='red'
-                          strokeWidth={2}
+                          stroke={selectedBlockIndex === index ? 'blue' : 'red'}
+                          strokeWidth={selectedBlockIndex === index ? 3 : 2}
                           onClick={(e) => {
                             e.cancelBubble = true
+                            setSelectedBlockIndex(index)
                             setSelected(e.target)
                           }}
                         />

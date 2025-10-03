@@ -1,18 +1,20 @@
 'use client'
 
 import { useState } from 'react'
-import { Button, Callout, Progress } from '@radix-ui/themes'
+import { Button, Callout, Progress, Select, Badge } from '@radix-ui/themes'
 import { Play, Download, AlertCircle, CheckCircle } from 'lucide-react'
 import { useEditorStore } from '@/lib/state'
 import { extractBackgroundColor } from '@/utils/color-extraction'
 import { ensureReadableContrast } from '@/utils/wcag-contrast'
 import { calculateOptimalFontSize } from '@/utils/font-sizing'
+import RenderCustomization from './render-customization'
 
 export default function RenderPanel() {
-  const { image, textBlocks, setTextBlocks } = useEditorStore()
+  const { image, textBlocks, setTextBlocks, renderMethod, setRenderMethod } = useEditorStore()
   const [processing, setProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [selectedBlock, setSelectedBlock] = useState<number | null>(null)
 
   const processColors = async () => {
     if (!image) {
@@ -61,7 +63,7 @@ export default function RenderPanel() {
           block.translatedText,
           boxWidth,
           boxHeight,
-          'Arial',
+          block.fontFamily || 'Arial',
           0.1
         )
 
@@ -72,6 +74,7 @@ export default function RenderPanel() {
           backgroundColor: readable.bgColor,
           textColor: readable.textColor,
           fontSize: fontMetrics.fontSize,
+          fontFamily: block.fontFamily || 'Arial',
         })
 
         setProgress((i + 1) / textBlocks.length)
@@ -99,7 +102,7 @@ export default function RenderPanel() {
       // 1. Draw original image
       ctx.drawImage(image.bitmap, 0, 0)
 
-      // 2. Draw rounded rectangles (with optional feathering)
+      // 2. Draw rounded rectangles
       for (const block of textBlocks) {
         if (!block.backgroundColor) continue
 
@@ -108,7 +111,7 @@ export default function RenderPanel() {
         const y = block.ymin
         const width = block.xmax - block.xmin
         const height = block.ymax - block.ymin
-        const radius = 5 // Rounded corners
+        const radius = 5
 
         ctx.fillStyle = `rgb(${bg.r}, ${bg.g}, ${bg.b})`
         ctx.beginPath()
@@ -116,13 +119,15 @@ export default function RenderPanel() {
         ctx.fill()
       }
 
-      // 3. Draw translated text
+      // 3. Draw translated text with font support
       for (const block of textBlocks) {
         if (!block.translatedText || !block.fontSize || !block.textColor) continue
 
         const textColor = block.manualTextColor || block.textColor
+        const fontFamily = block.fontFamily || 'Arial'
+
         ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
-        ctx.font = `${block.fontSize}px Arial`
+        ctx.font = `${block.fontSize}px ${fontFamily}`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
 
@@ -166,10 +171,10 @@ export default function RenderPanel() {
   const hasTranslations = textBlocks.some(b => b.translatedText)
 
   return (
-    <div className='flex w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md'>
+    <div className='flex w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md dark:border-gray-700 dark:bg-gray-800'>
       {/* Header */}
       <div className='flex items-center gap-2 p-3'>
-        <h2 className='font-medium'>Render</h2>
+        <h2 className='font-medium dark:text-white'>Render</h2>
         <div className='flex-grow'></div>
         <Button
           onClick={processColors}
@@ -190,13 +195,37 @@ export default function RenderPanel() {
         </Button>
       </div>
 
+      {/* Method Toggle */}
+      <div className='border-t border-gray-200 p-3 dark:border-gray-700'>
+        <label className='text-xs font-semibold text-gray-600 dark:text-gray-400'>
+          Rendering Method
+        </label>
+        <Select.Root value={renderMethod} onValueChange={(value: 'rectangle' | 'lama') => setRenderMethod(value)}>
+          <Select.Trigger className='w-full' />
+          <Select.Content>
+            <Select.Item value='rectangle'>
+              <div className='flex flex-col'>
+                <span className='font-medium'>Rectangle Fill (Fast)</span>
+                <span className='text-xs text-gray-500'>Instant, works on all devices</span>
+              </div>
+            </Select.Item>
+            <Select.Item value='lama'>
+              <div className='flex flex-col'>
+                <span className='font-medium'>LaMa AI (Quality)</span>
+                <span className='text-xs text-gray-500'>Slow, requires GPU, best results</span>
+              </div>
+            </Select.Item>
+          </Select.Content>
+        </Select.Root>
+      </div>
+
       {/* Body */}
       <div className='flex flex-col gap-2 p-3'>
         {/* Progress */}
         {processing && (
           <div className='space-y-2'>
             <Progress value={progress * 100} />
-            <p className='text-sm text-gray-600'>
+            <p className='text-sm text-gray-600 dark:text-gray-400'>
               Processing colors and fonts... {Math.round(progress * 100)}%
             </p>
           </div>
@@ -219,7 +248,7 @@ export default function RenderPanel() {
               <CheckCircle className='h-4 w-4' />
             </Callout.Icon>
             <Callout.Text>
-              Colors and fonts processed! Click Export to save.
+              Ready to export! Customize blocks below or export now.
             </Callout.Text>
           </Callout.Root>
         )}
@@ -227,24 +256,54 @@ export default function RenderPanel() {
         {/* Status */}
         <div className='flex flex-col gap-1 text-sm'>
           <div className='flex items-center justify-between'>
-            <span>Image:</span>
+            <span className='dark:text-gray-300'>Image:</span>
             <span className={image ? 'text-green-600' : 'text-gray-400'}>
               {image ? '✓ Loaded' : 'Not loaded'}
             </span>
           </div>
           <div className='flex items-center justify-between'>
-            <span>Text blocks:</span>
+            <span className='dark:text-gray-300'>Text blocks:</span>
             <span className={textBlocks.length > 0 ? 'text-green-600' : 'text-gray-400'}>
               {textBlocks.length > 0 ? `${textBlocks.length} detected` : 'None'}
             </span>
           </div>
           <div className='flex items-center justify-between'>
-            <span>Translations:</span>
+            <span className='dark:text-gray-300'>Translations:</span>
             <span className={hasTranslations ? 'text-green-600' : 'text-gray-400'}>
               {hasTranslations ? `${textBlocks.filter(b => b.translatedText).length} ready` : 'None'}
             </span>
           </div>
         </div>
+
+        {/* Block List for Customization */}
+        {hasProcessedColors && (
+          <div className='mt-2 space-y-2'>
+            <h3 className='text-sm font-semibold dark:text-white'>Customize Blocks</h3>
+            <div className='max-h-64 space-y-1 overflow-y-auto'>
+              {textBlocks.map((block, i) => (
+                block.backgroundColor && (
+                  <div key={i}>
+                    <button
+                      onClick={() => setSelectedBlock(selectedBlock === i ? null : i)}
+                      className='flex w-full items-center justify-between rounded p-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700'
+                    >
+                      <div className='flex items-center gap-2'>
+                        <Badge>{i + 1}</Badge>
+                        <span className='dark:text-gray-200'>{block.translatedText?.substring(0, 30)}...</span>
+                      </div>
+                      <span className='text-xs text-gray-500 dark:text-gray-400'>
+                        {selectedBlock === i ? '▼' : '▶'}
+                      </span>
+                    </button>
+                    {selectedBlock === i && (
+                      <RenderCustomization blockIndex={i} onReProcess={processColors} />
+                    )}
+                  </div>
+                )
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Instructions */}
         {!hasTranslations && (
@@ -256,6 +315,7 @@ export default function RenderPanel() {
                 <li>Run OCR to extract Japanese</li>
                 <li>Run Translation to get English</li>
                 <li>Click "Process" to calculate colors/fonts</li>
+                <li>Customize individual blocks if needed</li>
                 <li>Click "Export" to save final image</li>
               </ol>
             </Callout.Text>

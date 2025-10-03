@@ -21,6 +21,7 @@ export type TextBlock = {
   backgroundColor?: RGB
   textColor?: RGB
   fontSize?: number
+  fontFamily?: string
   // Manual overrides
   manualBgColor?: RGB
   manualTextColor?: RGB
@@ -30,6 +31,18 @@ export type TextBlock = {
 const loadApiKey = (): string | null => {
   if (typeof window === 'undefined') return null
   return localStorage.getItem('google_translate_api_key')
+}
+
+// Load theme preference
+const loadTheme = (): 'light' | 'dark' => {
+  if (typeof window === 'undefined') return 'light'
+  return (localStorage.getItem('theme') as 'light' | 'dark') || 'light'
+}
+
+// Load rendering method preference
+const loadRenderMethod = (): 'rectangle' | 'lama' => {
+  if (typeof window === 'undefined') return 'rectangle'
+  return (localStorage.getItem('render_method') as 'rectangle' | 'lama') || 'rectangle'
 }
 
 export const useEditorStore = create(
@@ -42,6 +55,9 @@ export const useEditorStore = create(
       translationApiKey: loadApiKey(),
       segmentationMask: null,
       inpaintedImage: null,
+      theme: loadTheme(),
+      renderMethod: loadRenderMethod(),
+      selectedBlockIndex: null,
     } as {
       image: Image | null
       tool: string
@@ -50,6 +66,9 @@ export const useEditorStore = create(
       translationApiKey: string | null
       segmentationMask: number[] | null
       inpaintedImage: Image | null
+      theme: 'light' | 'dark'
+      renderMethod: 'rectangle' | 'lama'
+      selectedBlockIndex: number | null
     },
     (set) => ({
       setImage: (image: Image | null) => set({ image }),
@@ -68,6 +87,20 @@ export const useEditorStore = create(
       },
       setSegmentationMask: (mask: number[] | null) => set({ segmentationMask: mask }),
       setInpaintedImage: (image: Image | null) => set({ inpaintedImage: image }),
+      setTheme: (theme: 'light' | 'dark') => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('theme', theme)
+          document.documentElement.classList.toggle('dark', theme === 'dark')
+        }
+        set({ theme })
+      },
+      setRenderMethod: (method: 'rectangle' | 'lama') => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('render_method', method)
+        }
+        set({ renderMethod: method })
+      },
+      setSelectedBlockIndex: (index: number | null) => set({ selectedBlockIndex: index }),
     })
   )
 )
