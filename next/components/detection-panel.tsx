@@ -7,12 +7,10 @@ import { invoke } from '@tauri-apps/api/core'
 import { useEditorStore } from '@/lib/state'
 
 export default function DetectionPanel() {
-  const { image } = useEditorStore()
+  const { image, textBlocks, setTextBlocks } = useEditorStore()
   const [loading, setLoading] = useState(false)
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.5)
   const [nmsThreshold, setNmsThreshold] = useState(0.5)
-
-  const texts = []
 
   const run = async () => {
     setLoading(true)
@@ -26,6 +24,9 @@ export default function DetectionPanel() {
 
       console.log('Detection result:', result)
 
+      if (result?.bboxes) {
+        setTextBlocks(result.bboxes)
+      }
     } catch (error) {
       console.error('Error during detection:', error)
     } finally {
@@ -75,7 +76,7 @@ export default function DetectionPanel() {
             />
           </div>
           <Text>
-            <strong>{texts.length}</strong> text blocks detected
+            <strong>{textBlocks.length}</strong> text blocks detected
           </Text>
         </div>
       </div>

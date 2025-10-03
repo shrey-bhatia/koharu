@@ -15,14 +15,11 @@ import ScaleControl from './scale-control'
 import { useEditorStore } from '@/lib/state'
 
 function Canvas() {
-  const { tool, scale, image } = useEditorStore()
+  const { tool, scale, image, textBlocks } = useEditorStore()
   const containerRef = useRef<HTMLDivElement>(null)
   const inpaintLayerRef = useRef<Konva.Layer>(null)
 
   const [selected, setSelected] = useState<any>(null)
-
-  // TODO
-  const texts = []
 
   return (
     <>
@@ -42,7 +39,7 @@ function Canvas() {
                 <Image image={image?.bitmap ?? null} />
               </Layer>
               <Layer>
-                {texts?.map((block, index) => {
+                {textBlocks?.map((block, index) => {
                   const { xmin, ymin, xmax, ymax } = block
                   const width = xmax - xmin
                   const height = ymax - ymin
