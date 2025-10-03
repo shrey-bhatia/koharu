@@ -1,0 +1,170 @@
+'use client'
+
+import { useState } from 'react'
+import { Dialog, Button, TextField, Text, Callout } from '@radix-ui/themes'
+import { Settings, CheckCircle, XCircle } from 'lucide-react'
+import { useEditorStore } from '@/lib/state'
+import { testApiKey } from '@/utils/translation'
+
+export default function SettingsDialog() {
+  const { translationApiKey, setTranslationApiKey } = useEditorStore()
+  const [open, setOpen] = useState(false)
+  const [apiKeyInput, setApiKeyInput] = useState(translationApiKey || '')
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<'success' | 'error' | null>(null)
+  const [testMessage, setTestMessage] = useState('')
+
+  const handleTest = async () => {
+    if (!apiKeyInput || apiKeyInput.trim().length === 0) {
+      setTestResult('error')
+      setTestMessage('Please enter an API key first')
+      return
+    }
+
+    setTesting(true)
+    setTestResult(null)
+    setTestMessage('')
+
+    try {
+      const isValid = await testApiKey(apiKeyInput.trim())
+      if (isValid) {
+        setTestResult('success')
+        setTestMessage('API key is valid! ✓')
+      } else {
+        setTestResult('error')
+        setTestMessage('API key is invalid or has insufficient permissions')
+      }
+    } catch (err) {
+      setTestResult('error')
+      setTestMessage(err instanceof Error ? err.message : 'Connection failed')
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const handleSave = () => {
+    const trimmedKey = apiKeyInput.trim()
+    setTranslationApiKey(trimmedKey || null)
+    setOpen(false)
+    setTestResult(null)
+    setTestMessage('')
+  }
+
+  const handleCancel = () => {
+    setApiKeyInput(translationApiKey || '')
+    setOpen(false)
+    setTestResult(null)
+    setTestMessage('')
+  }
+
+  const handleClear = () => {
+    setApiKeyInput('')
+    setTranslationApiKey(null)
+    setTestResult(null)
+    setTestMessage('')
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={setOpen}>
+      <Dialog.Trigger>
+        <Button variant='soft' size='2'>
+          <Settings className='h-4 w-4' />
+        </Button>
+      </Dialog.Trigger>
+
+      <Dialog.Content maxWidth='450px'>
+        <Dialog.Title>Translation Settings</Dialog.Title>
+        <Dialog.Description size='2' mb='4'>
+          Configure your Google Cloud Translation API key for automatic manga translation.
+        </Dialog.Description>
+
+        <div className='space-y-4'>
+          <div className='space-y-2'>
+            <label>
+              <Text as='div' size='2' mb='1' weight='bold'>
+                API Key
+              </Text>
+              <TextField.Root
+                type='password'
+                placeholder='Enter your Google Cloud API key'
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleTest()
+                  }
+                }}
+              />
+            </label>
+
+            <div className='flex gap-2'>
+              <Button
+                size='1'
+                variant='soft'
+                onClick={handleTest}
+                disabled={testing || !apiKeyInput}
+                loading={testing}
+              >
+                Test Connection
+              </Button>
+              {apiKeyInput && (
+                <Button size='1' variant='soft' color='red' onClick={handleClear}>
+                  Clear
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Test result */}
+          {testResult && (
+            <Callout.Root color={testResult === 'success' ? 'green' : 'red'} size='1'>
+              <Callout.Icon>
+                {testResult === 'success' ? (
+                  <CheckCircle className='h-4 w-4' />
+                ) : (
+                  <XCircle className='h-4 w-4' />
+                )}
+              </Callout.Icon>
+              <Callout.Text>{testMessage}</Callout.Text>
+            </Callout.Root>
+          )}
+
+          {/* Instructions */}
+          <div className='rounded border border-gray-200 bg-gray-50 p-3'>
+            <Text size='1' className='text-gray-700'>
+              <strong>How to get an API key:</strong>
+              <ol className='ml-4 mt-2 list-decimal space-y-1'>
+                <li>Go to Google Cloud Console</li>
+                <li>Enable Cloud Translation API</li>
+                <li>Create credentials → API Key</li>
+                <li>Copy and paste the key above</li>
+              </ol>
+              <div className='mt-2'>
+                <strong>Free tier:</strong> 500,000 characters/month
+              </div>
+            </Text>
+          </div>
+
+          {/* Security notice */}
+          <Callout.Root size='1'>
+            <Callout.Text>
+              <strong>Note:</strong> Your API key is stored locally in your browser and never sent
+              anywhere except Google Translation API.
+            </Callout.Text>
+          </Callout.Root>
+        </div>
+
+        <div className='mt-6 flex justify-end gap-3'>
+          <Dialog.Close>
+            <Button variant='soft' color='gray' onClick={handleCancel}>
+              Cancel
+            </Button>
+          </Dialog.Close>
+          <Dialog.Close>
+            <Button onClick={handleSave}>Save</Button>
+          </Dialog.Close>
+        </div>
+      </Dialog.Content>
+    </Dialog.Root>
+  )
+}

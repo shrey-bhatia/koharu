@@ -40,3 +40,4 @@ models/
 
 # Google Translation API Key
 elite-vault-*.json
+dont-commit-this-api-key-for-google-translation.txt

@@ -5,6 +5,7 @@ import { Button } from '@radix-ui/themes'
 import { fileOpen } from 'browser-fs-access'
 import { useEditorStore } from '@/lib/state'
 import { createImageFromBlob } from '@/lib/image'
+import SettingsDialog from './settings-dialog'
 
 function Topbar() {
   const { setImage } = useEditorStore()
@@ -34,7 +35,9 @@ function Topbar() {
       </div>
 
       <div className='flex-grow' />
-      <div className='mx-1 flex items-center gap-1'></div>
+      <div className='mx-1 flex items-center gap-1'>
+        <SettingsDialog />
+      </div>
     </div>
   )
 }
