@@ -37,3 +37,6 @@ runs/
 # model checkpoints
 models/
 .env
+
+# Google Translation API Key
+elite-vault-*.json
