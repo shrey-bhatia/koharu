@@ -35,51 +35,113 @@ function Canvas() {
                 setSelected(null)
               }}
             >
+              {/* Layer 1: Original image */}
               <Layer>
                 <Image image={image?.bitmap ?? null} />
               </Layer>
-              <Layer>
-                {textBlocks?.map((block, index) => {
-                  const { xmin, ymin, xmax, ymax } = block
-                  const width = xmax - xmin
-                  const height = ymax - ymin
 
-                  return (
-                    <>
+              {/* Layer 2: Rectangle fills (render mode) */}
+              {tool === 'render' && (
+                <Layer>
+                  {textBlocks?.map((block, index) => {
+                    if (!block.backgroundColor) return null
+
+                    const bg = block.manualBgColor || block.backgroundColor
+                    const { xmin, ymin, xmax, ymax } = block
+                    const width = xmax - xmin
+                    const height = ymax - ymin
+
+                    return (
                       <Rect
-                        key={`rect-${index}`}
+                        key={`fill-${index}`}
                         x={xmin}
                         y={ymin}
                         width={width}
                         height={height}
-                        stroke='red'
-                        strokeWidth={2}
-                        onClick={(e) => {
-                          e.cancelBubble = true
-                          setSelected(e.target)
-                        }}
+                        fill={`rgb(${bg.r}, ${bg.g}, ${bg.b})`}
+                        cornerRadius={5}
                       />
-                      <Circle
-                        key={`circle-${index}`}
+                    )
+                  })}
+                </Layer>
+              )}
+
+              {/* Layer 3: Translated text (render mode) */}
+              {tool === 'render' && (
+                <Layer>
+                  {textBlocks?.map((block, index) => {
+                    if (!block.translatedText || !block.fontSize || !block.textColor) return null
+
+                    const textColor = block.manualTextColor || block.textColor
+                    const { xmin, ymin, xmax, ymax } = block
+                    const width = xmax - xmin
+                    const height = ymax - ymin
+
+                    return (
+                      <Text
+                        key={`translated-${index}`}
                         x={xmin}
                         y={ymin}
-                        radius={20}
-                        fill='rgba(255, 0, 0, 0.7)'
+                        width={width}
+                        height={height}
+                        text={block.translatedText}
+                        fontSize={block.fontSize}
+                        fontFamily='Arial'
+                        fill={`rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`}
+                        align='center'
+                        verticalAlign='middle'
+                        wrap='word'
                       />
-                      <Text
-                        key={`text-${index}`}
-                        x={xmin - 10}
-                        y={ymin - 15}
-                        text={(index + 1).toString()}
-                        fontSize={30}
-                        fill='white'
-                        fontFamily='sans-serif'
-                      />
-                    </>
-                  )
-                })}
-                {selected && <Transformer nodes={[selected]} />}
-              </Layer>
+                    )
+                  })}
+                </Layer>
+              )}
+
+              {/* Layer 4: Detection boxes (detection mode) */}
+              {tool === 'detection' && (
+                <Layer>
+                  {textBlocks?.map((block, index) => {
+                    const { xmin, ymin, xmax, ymax } = block
+                    const width = xmax - xmin
+                    const height = ymax - ymin
+
+                    return (
+                      <>
+                        <Rect
+                          key={`rect-${index}`}
+                          x={xmin}
+                          y={ymin}
+                          width={width}
+                          height={height}
+                          stroke='red'
+                          strokeWidth={2}
+                          onClick={(e) => {
+                            e.cancelBubble = true
+                            setSelected(e.target)
+                          }}
+                        />
+                        <Circle
+                          key={`circle-${index}`}
+                          x={xmin}
+                          y={ymin}
+                          radius={20}
+                          fill='rgba(255, 0, 0, 0.7)'
+                        />
+                        <Text
+                          key={`text-${index}`}
+                          x={xmin - 10}
+                          y={ymin - 15}
+                          text={(index + 1).toString()}
+                          fontSize={30}
+                          fill='white'
+                          fontFamily='sans-serif'
+                        />
+                      </>
+                    )
+                  })}
+                  {selected && <Transformer nodes={[selected]} />}
+                </Layer>
+              )}
               <Layer>{tool === 'segmentation' && <Image image={null} />}</Layer>
               <Layer ref={inpaintLayerRef}>
                 {tool === 'inpaint' && inpaintedImage && (

@@ -1,0 +1,267 @@
+'use client'
+
+import { useState } from 'react'
+import { Button, Callout, Progress } from '@radix-ui/themes'
+import { Play, Download, AlertCircle, CheckCircle } from 'lucide-react'
+import { useEditorStore } from '@/lib/state'
+import { extractBackgroundColor } from '@/utils/color-extraction'
+import { ensureReadableContrast } from '@/utils/wcag-contrast'
+import { calculateOptimalFontSize } from '@/utils/font-sizing'
+
+export default function RenderPanel() {
+  const { image, textBlocks, setTextBlocks } = useEditorStore()
+  const [processing, setProcessing] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+
+  const processColors = async () => {
+    if (!image) {
+      setError('No image loaded')
+      return
+    }
+
+    if (textBlocks.length === 0) {
+      setError('No text blocks found. Run Detection first.')
+      return
+    }
+
+    setProcessing(true)
+    setError(null)
+    setProgress(0)
+
+    try {
+      const updated = []
+
+      for (let i = 0; i < textBlocks.length; i++) {
+        const block = textBlocks[i]
+
+        // Skip blocks without translation
+        if (!block.translatedText) {
+          updated.push(block)
+          setProgress((i + 1) / textBlocks.length)
+          continue
+        }
+
+        console.log(`Processing block ${i + 1}/${textBlocks.length}...`)
+
+        // Extract background color from border
+        const colors = await extractBackgroundColor(image.bitmap, block, 10)
+
+        // Ensure readable contrast
+        const readable = ensureReadableContrast(
+          colors.backgroundColor,
+          colors.textColor,
+          4.5
+        )
+
+        // Calculate optimal font size
+        const boxWidth = block.xmax - block.xmin
+        const boxHeight = block.ymax - block.ymin
+        const fontMetrics = calculateOptimalFontSize(
+          block.translatedText,
+          boxWidth,
+          boxHeight,
+          'Arial',
+          0.1
+        )
+
+        console.log(`Block ${i + 1}: bg=${JSON.stringify(readable.bgColor)}, fontSize=${fontMetrics.fontSize}px`)
+
+        updated.push({
+          ...block,
+          backgroundColor: readable.bgColor,
+          textColor: readable.textColor,
+          fontSize: fontMetrics.fontSize,
+        })
+
+        setProgress((i + 1) / textBlocks.length)
+      }
+
+      setTextBlocks(updated)
+      console.log('Color processing complete!')
+    } catch (err) {
+      console.error('Color processing error:', err)
+      setError(err instanceof Error ? err.message : 'Failed to process colors')
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  const exportImage = async () => {
+    if (!image) return
+
+    try {
+      // Create offscreen canvas at original resolution
+      const canvas = new OffscreenCanvas(image.bitmap.width, image.bitmap.height)
+      const ctx = canvas.getContext('2d')
+      if (!ctx) throw new Error('Failed to get canvas context')
+
+      // 1. Draw original image
+      ctx.drawImage(image.bitmap, 0, 0)
+
+      // 2. Draw rounded rectangles (with optional feathering)
+      for (const block of textBlocks) {
+        if (!block.backgroundColor) continue
+
+        const bg = block.manualBgColor || block.backgroundColor
+        const x = block.xmin
+        const y = block.ymin
+        const width = block.xmax - block.xmin
+        const height = block.ymax - block.ymin
+        const radius = 5 // Rounded corners
+
+        ctx.fillStyle = `rgb(${bg.r}, ${bg.g}, ${bg.b})`
+        ctx.beginPath()
+        ctx.roundRect(x, y, width, height, radius)
+        ctx.fill()
+      }
+
+      // 3. Draw translated text
+      for (const block of textBlocks) {
+        if (!block.translatedText || !block.fontSize || !block.textColor) continue
+
+        const textColor = block.manualTextColor || block.textColor
+        ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
+        ctx.font = `${block.fontSize}px Arial`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+
+        const centerX = (block.xmin + block.xmax) / 2
+        const centerY = (block.ymin + block.ymax) / 2
+
+        // Handle multiline text
+        const lines = block.translatedText.split('\n')
+        const lineHeight = block.fontSize * 1.2
+
+        if (lines.length === 1) {
+          ctx.fillText(block.translatedText, centerX, centerY)
+        } else {
+          const startY = centerY - ((lines.length - 1) * lineHeight) / 2
+          lines.forEach((line, i) => {
+            ctx.fillText(line, centerX, startY + i * lineHeight)
+          })
+        }
+      }
+
+      // 4. Export as PNG
+      const blob = await canvas.convertToBlob({ type: 'image/png', quality: 1.0 })
+      const url = URL.createObjectURL(blob)
+
+      // 5. Trigger download
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `translated-manga-${Date.now()}.png`
+      a.click()
+
+      URL.revokeObjectURL(url)
+
+      console.log('Image exported successfully!')
+    } catch (err) {
+      console.error('Export error:', err)
+      setError(err instanceof Error ? err.message : 'Failed to export image')
+    }
+  }
+
+  const hasProcessedColors = textBlocks.some(b => b.backgroundColor)
+  const hasTranslations = textBlocks.some(b => b.translatedText)
+
+  return (
+    <div className='flex w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md'>
+      {/* Header */}
+      <div className='flex items-center gap-2 p-3'>
+        <h2 className='font-medium'>Render</h2>
+        <div className='flex-grow'></div>
+        <Button
+          onClick={processColors}
+          loading={processing}
+          variant='soft'
+          disabled={!image || !hasTranslations}
+        >
+          <Play className='h-4 w-4' />
+          Process
+        </Button>
+        <Button
+          onClick={exportImage}
+          variant='solid'
+          disabled={!hasProcessedColors}
+        >
+          <Download className='h-4 w-4' />
+          Export
+        </Button>
+      </div>
+
+      {/* Body */}
+      <div className='flex flex-col gap-2 p-3'>
+        {/* Progress */}
+        {processing && (
+          <div className='space-y-2'>
+            <Progress value={progress * 100} />
+            <p className='text-sm text-gray-600'>
+              Processing colors and fonts... {Math.round(progress * 100)}%
+            </p>
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <Callout.Root color='red' size='1'>
+            <Callout.Icon>
+              <AlertCircle className='h-4 w-4' />
+            </Callout.Icon>
+            <Callout.Text>{error}</Callout.Text>
+          </Callout.Root>
+        )}
+
+        {/* Success */}
+        {hasProcessedColors && !processing && (
+          <Callout.Root color='green' size='1'>
+            <Callout.Icon>
+              <CheckCircle className='h-4 w-4' />
+            </Callout.Icon>
+            <Callout.Text>
+              Colors and fonts processed! Click Export to save.
+            </Callout.Text>
+          </Callout.Root>
+        )}
+
+        {/* Status */}
+        <div className='flex flex-col gap-1 text-sm'>
+          <div className='flex items-center justify-between'>
+            <span>Image:</span>
+            <span className={image ? 'text-green-600' : 'text-gray-400'}>
+              {image ? '✓ Loaded' : 'Not loaded'}
+            </span>
+          </div>
+          <div className='flex items-center justify-between'>
+            <span>Text blocks:</span>
+            <span className={textBlocks.length > 0 ? 'text-green-600' : 'text-gray-400'}>
+              {textBlocks.length > 0 ? `${textBlocks.length} detected` : 'None'}
+            </span>
+          </div>
+          <div className='flex items-center justify-between'>
+            <span>Translations:</span>
+            <span className={hasTranslations ? 'text-green-600' : 'text-gray-400'}>
+              {hasTranslations ? `${textBlocks.filter(b => b.translatedText).length} ready` : 'None'}
+            </span>
+          </div>
+        </div>
+
+        {/* Instructions */}
+        {!hasTranslations && (
+          <Callout.Root size='1'>
+            <Callout.Text>
+              <strong>To render translations:</strong>
+              <ol className='ml-4 mt-1 list-decimal text-xs'>
+                <li>Run Detection to find text</li>
+                <li>Run OCR to extract Japanese</li>
+                <li>Run Translation to get English</li>
+                <li>Click "Process" to calculate colors/fonts</li>
+                <li>Click "Export" to save final image</li>
+              </ol>
+            </Callout.Text>
+          </Callout.Root>
+        )}
+      </div>
+    </div>
+  )
+}

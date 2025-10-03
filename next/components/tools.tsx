@@ -5,6 +5,7 @@ import {
   MessageCircle,
   PaintbrushVertical,
   SquareDashedMousePointer,
+  Type,
 } from 'lucide-react'
 import { IconButton } from '@radix-ui/themes'
 import { useEditorStore } from '@/lib/state'
@@ -32,6 +33,11 @@ function Tools() {
       id: 'translation',
       icon: Languages,
       description: 'Translate text blocks',
+    },
+    {
+      id: 'render',
+      icon: Type,
+      description: 'Render translated text',
     },
   ]
 

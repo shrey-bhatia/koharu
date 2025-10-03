@@ -2,6 +2,12 @@ import { create } from 'zustand'
 import { combine } from 'zustand/middleware'
 import { Image } from './image'
 
+export interface RGB {
+  r: number
+  g: number
+  b: number
+}
+
 export type TextBlock = {
   xmin: number
   ymin: number
@@ -11,6 +17,13 @@ export type TextBlock = {
   class: number
   text?: string
   translatedText?: string
+  // Rendering fields (Option 1: Rectangle fill)
+  backgroundColor?: RGB
+  textColor?: RGB
+  fontSize?: number
+  // Manual overrides
+  manualBgColor?: RGB
+  manualTextColor?: RGB
 }
 
 // Load API key from localStorage (browser/Tauri context)
