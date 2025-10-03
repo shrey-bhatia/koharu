@@ -3,32 +3,39 @@
 import { Play } from 'lucide-react'
 import { useState } from 'react'
 import { Badge, Button, Text } from '@radix-ui/themes'
-import { crop } from '@/utils/image'
+import { crop, imageBitmapToArrayBuffer } from '@/utils/image'
 import { useEditorStore } from '@/lib/state'
 import { invoke } from '@tauri-apps/api/core'
 
 export default function OCRPanel() {
-  const { image } = useEditorStore()
+  const { image, textBlocks, setTextBlocks } = useEditorStore()
   const [loading, setLoading] = useState(false)
 
-  const texts = []
-
   const run = async () => {
+    if (!image || !textBlocks.length) return
+
     setLoading(true)
-    const newTexts = []
-    for (const text of texts) {
-      const { xmin, ymin, xmax, ymax } = text
-      const croppedImage = await crop(
-        image.bitmap,
-        xmin,
-        ymin,
-        xmax - xmin,
-        ymax - ymin
-      )
-      const result = await invoke<any>('ocr', { image: croppedImage })
-      newTexts.push({ ...text, text: result })
+    try {
+      const updatedBlocks = []
+      for (const block of textBlocks) {
+        const { xmin, ymin, xmax, ymax } = block
+        const croppedBitmap = await crop(
+          image.bitmap,
+          Math.floor(xmin),
+          Math.floor(ymin),
+          Math.floor(xmax - xmin),
+          Math.floor(ymax - ymin)
+        )
+        const croppedBuffer = await imageBitmapToArrayBuffer(croppedBitmap)
+        const result = await invoke<string>('ocr', { image: Array.from(new Uint8Array(croppedBuffer)) })
+        updatedBlocks.push({ ...block, text: result })
+      }
+      setTextBlocks(updatedBlocks)
+    } catch (error) {
+      console.error('Error during OCR:', error)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   return (
@@ -42,7 +49,7 @@ export default function OCRPanel() {
         </Button>
       </div>
       <div className='flex flex-col overflow-y-auto'>
-        {texts?.map((block, index) => (
+        {textBlocks?.map((block, index) => (
           <div
             key={index}
             className='cursor-pointer border-b border-gray-200 px-4 py-2 text-sm last:border-b-0'

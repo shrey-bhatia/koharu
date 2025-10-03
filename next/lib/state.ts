@@ -9,6 +9,7 @@ export type TextBlock = {
   ymax: number
   confidence: number
   class: number
+  text?: string
 }
 
 export const useEditorStore = create(
