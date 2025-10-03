@@ -10,23 +10,59 @@ Complete the manga translation pipeline to enable automatic Japanese→English m
 ### ✅ Working Features
 - [x] Text detection (bounding boxes)
 - [x] OCR (Japanese text extraction)
+- [x] Translation (Google Cloud Translation API) ✨ **NEW**
 - [x] CUDA acceleration
 - [x] Basic UI and canvas rendering
+- [x] API key management with localStorage persistence
 
 ### ❌ Missing Features
-- [ ] Segmentation mask display
-- [ ] Translation (LLM/API integration)
+- [ ] Segmentation mask storage
 - [ ] Inpainting UI
 - [ ] Text rendering on inpainted image
+- [ ] Manual translation editing
 - [ ] Export functionality
 
 ---
 
 ## Development Phases
 
-### Phase 1: Segmentation Visualization (NEXT UP)
+> **IMPORTANT**: See [PHASE3-4-IMPLEMENTATION.md](./PHASE3-4-IMPLEMENTATION.md) for detailed technical specifications, architecture decisions, and implementation guidelines.
 
-**Goal**: Display the segmentation mask from detection
+### ~~Phase 1: Segmentation Visualization~~ ✅ SKIP
+
+**Status**: Not needed as separate phase - will implement mask storage as part of Phase 3 (Inpainting)
+
+**Reason**: Viewing the mask alone doesn't add value. We need it stored for inpainting, so we'll do both together.
+
+---
+
+### ~~Phase 2: Translation~~ ✅ COMPLETE
+
+**What was implemented**:
+- Google Cloud Translation API integration via REST (no SDK)
+- API key management with localStorage persistence
+- Settings dialog for key input and testing
+- Translation panel with progress tracking and error handling
+- Support for batch translation with rate limiting
+
+**Files added**:
+- `next/utils/translation.ts` - REST API wrapper
+- `next/components/settings-dialog.tsx` - API key UI
+
+**Files modified**:
+- `next/lib/state.ts` - Added `translationApiKey` + `translatedText` field
+- `next/components/translation-panel.tsx` - Full implementation
+- `next/components/topbar.tsx` - Settings button
+
+---
+
+### Phase 3: Inpainting (NEXT UP - CRITICAL)
+
+**Goal**: Remove Japanese text from manga using LaMa AI inpainting model
+
+**Why this matters**: LaMa intelligently fills text areas by analyzing surrounding manga artwork (screentones, gradients, patterns) - much better than just "painting it white"
+
+**Time estimate**: 3-4 hours
 
 **Tasks**:
 1. [ ] Add `segmentationMask` to state
