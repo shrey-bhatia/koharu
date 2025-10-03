@@ -7,7 +7,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useEditorStore } from '@/lib/state'
 
 export default function DetectionPanel() {
-  const { image, textBlocks, setTextBlocks } = useEditorStore()
+  const { image, textBlocks, setTextBlocks, setSegmentationMask } = useEditorStore()
   const [loading, setLoading] = useState(false)
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.5)
   const [nmsThreshold, setNmsThreshold] = useState(0.5)
@@ -26,6 +26,12 @@ export default function DetectionPanel() {
 
       if (result?.bboxes) {
         setTextBlocks(result.bboxes)
+      }
+
+      // Store segmentation mask for inpainting
+      if (result?.segment) {
+        setSegmentationMask(result.segment)
+        console.log('Segmentation mask stored:', result.segment.length, 'bytes')
       }
     } catch (error) {
       console.error('Error during detection:', error)

@@ -27,12 +27,16 @@ export const useEditorStore = create(
       scale: 1,
       textBlocks: [],
       translationApiKey: loadApiKey(),
+      segmentationMask: null,
+      inpaintedImage: null,
     } as {
       image: Image | null
       tool: string
       scale: number
       textBlocks: TextBlock[]
       translationApiKey: string | null
+      segmentationMask: number[] | null
+      inpaintedImage: Image | null
     },
     (set) => ({
       setImage: (image: Image | null) => set({ image }),
@@ -49,6 +53,8 @@ export const useEditorStore = create(
         }
         set({ translationApiKey: key })
       },
+      setSegmentationMask: (mask: number[] | null) => set({ segmentationMask: mask }),
+      setInpaintedImage: (image: Image | null) => set({ inpaintedImage: image }),
     })
   )
 )

@@ -15,7 +15,7 @@ import ScaleControl from './scale-control'
 import { useEditorStore } from '@/lib/state'
 
 function Canvas() {
-  const { tool, scale, image, textBlocks } = useEditorStore()
+  const { tool, scale, image, textBlocks, inpaintedImage } = useEditorStore()
   const containerRef = useRef<HTMLDivElement>(null)
   const inpaintLayerRef = useRef<Konva.Layer>(null)
 
@@ -82,7 +82,9 @@ function Canvas() {
               </Layer>
               <Layer>{tool === 'segmentation' && <Image image={null} />}</Layer>
               <Layer ref={inpaintLayerRef}>
-                {tool === 'inpaint' && <Image image={null} />}
+                {tool === 'inpaint' && inpaintedImage && (
+                  <Image image={inpaintedImage.bitmap} />
+                )}
               </Layer>
             </Stage>
           </div>
