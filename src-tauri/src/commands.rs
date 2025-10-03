@@ -54,5 +54,11 @@ pub async fn inpaint(app: AppHandle, image: Vec<u8>, mask: Vec<u8>) -> CommandRe
         .inference(&img, &mask_img)
         .context("Failed to perform inpainting")?;
 
-    Ok(result.into_bytes().to_vec())
+    // Encode result as PNG so frontend can decode it
+    let mut png_bytes = Vec::new();
+    result
+        .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+        .context("Failed to encode inpainted image as PNG")?;
+
+    Ok(png_bytes)
 }
