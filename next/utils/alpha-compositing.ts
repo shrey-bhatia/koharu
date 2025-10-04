@@ -1,5 +1,11 @@
 import { TextBlock } from '@/lib/state'
 
+export interface CompositingOptions {
+  featherRadius?: number
+  autoSeamFix?: boolean // Enable automatic seam fix for high-variance edges
+  seamThreshold?: number // Variance threshold for triggering seam fix
+}
+
 export async function compositeMaskedRegion(
   baseCtx: OffscreenCanvasRenderingContext2D,
   inpaintedCrop: ImageBitmap,
@@ -11,8 +17,14 @@ export async function compositeMaskedRegion(
   fullMask: number[],
   origWidth: number,
   origHeight: number,
-  featherRadius: number = 5
+  options: CompositingOptions = {}
 ) {
+  const {
+    featherRadius = 5,
+    autoSeamFix = false,
+    seamThreshold = 30,
+  } = options
+
   // Step 1: Extract mask region for this text block
   const maskRegion = extractMaskRegion(
     fullMask,
@@ -23,22 +35,49 @@ export async function compositeMaskedRegion(
     cropHeight
   )
 
-  // Step 2: Create feathered alpha-masked ImageData with inpainted pixels
-  const maskedImageData = createFeatheredAlpha(
+  // Step 2: Detect edge variance to determine if seam fix is needed
+  const needsSeamFix = autoSeamFix && detectHighEdgeVariance(
+    baseCtx,
     inpaintedCrop,
-    maskRegion,
+    cropX,
+    cropY,
     cropWidth,
     cropHeight,
-    featherRadius
+    maskRegion,
+    seamThreshold
   )
 
-  // Step 3: Create temporary canvas to hold the masked inpaint
-  const tempCanvas = new OffscreenCanvas(cropWidth, cropHeight)
-  const tempCtx = tempCanvas.getContext('2d')!
-  tempCtx.putImageData(maskedImageData, 0, 0)
+  if (needsSeamFix) {
+    console.log(`Block at (${cropX}, ${cropY}): High edge variance detected, using gradient-domain blending`)
+    // Use Poisson blending approximation (gradient-domain composite)
+    await compositeWithGradientBlend(
+      baseCtx,
+      inpaintedCrop,
+      cropX,
+      cropY,
+      cropWidth,
+      cropHeight,
+      maskRegion,
+      featherRadius
+    )
+  } else {
+    // Step 3: Create feathered alpha-masked ImageData with inpainted pixels
+    const maskedImageData = createFeatheredAlpha(
+      inpaintedCrop,
+      maskRegion,
+      cropWidth,
+      cropHeight,
+      featherRadius
+    )
 
-  // Step 4: Composite onto base canvas with default 'source-over' blending
-  baseCtx.drawImage(tempCanvas, cropX, cropY)
+    // Step 4: Create temporary canvas to hold the masked inpaint
+    const tempCanvas = new OffscreenCanvas(cropWidth, cropHeight)
+    const tempCtx = tempCanvas.getContext('2d')!
+    tempCtx.putImageData(maskedImageData, 0, 0)
+
+    // Step 5: Composite onto base canvas with default 'source-over' blending
+    baseCtx.drawImage(tempCanvas, cropX, cropY)
+  }
 }
 
 function extractMaskRegion(
@@ -125,4 +164,167 @@ function createFeatheredAlpha(
   }
 
   return inpaintedData
+}
+
+/**
+ * Detect high edge variance across mask boundary
+ * Returns true if the edge has significant color gradients/textures
+ */
+function detectHighEdgeVariance(
+  baseCtx: OffscreenCanvasRenderingContext2D,
+  inpaintedCrop: ImageBitmap,
+  cropX: number,
+  cropY: number,
+  cropWidth: number,
+  cropHeight: number,
+  maskRegion: Uint8Array,
+  threshold: number
+): boolean {
+  // Sample pixels along mask boundary from base image
+  const baseImageData = baseCtx.getImageData(cropX, cropY, cropWidth, cropHeight)
+  const basePixels = baseImageData.data
+
+  // Get inpainted pixels
+  const tempCanvas = new OffscreenCanvas(cropWidth, cropHeight)
+  const tempCtx = tempCanvas.getContext('2d')!
+  tempCtx.drawImage(inpaintedCrop, 0, 0, cropWidth, cropHeight)
+  const inpaintData = tempCtx.getImageData(0, 0, cropWidth, cropHeight)
+  const inpaintPixels = inpaintData.data
+
+  // Find boundary pixels (mask transition zone)
+  let totalVariance = 0
+  let boundaryCount = 0
+
+  for (let y = 1; y < cropHeight - 1; y++) {
+    for (let x = 1; x < cropWidth - 1; x++) {
+      const maskVal = maskRegion[y * cropWidth + x]
+
+      // Check if this is a boundary pixel (mask edge)
+      const isEdge = maskVal > 30 && (
+        maskRegion[(y - 1) * cropWidth + x] < 30 ||
+        maskRegion[(y + 1) * cropWidth + x] < 30 ||
+        maskRegion[y * cropWidth + (x - 1)] < 30 ||
+        maskRegion[y * cropWidth + (x + 1)] < 30
+      )
+
+      if (!isEdge) continue
+
+      // Calculate color difference between base and inpaint at boundary
+      const idx = (y * cropWidth + x) * 4
+      const dr = basePixels[idx] - inpaintPixels[idx]
+      const dg = basePixels[idx + 1] - inpaintPixels[idx + 1]
+      const db = basePixels[idx + 2] - inpaintPixels[idx + 2]
+      const colorDiff = Math.sqrt(dr * dr + dg * dg + db * db)
+
+      totalVariance += colorDiff
+      boundaryCount++
+    }
+  }
+
+  if (boundaryCount === 0) return false
+
+  const avgVariance = totalVariance / boundaryCount
+  return avgVariance > threshold
+}
+
+/**
+ * Composite using gradient-domain blending (simplified Poisson)
+ * This reduces seams by blending gradients rather than colors
+ */
+async function compositeWithGradientBlend(
+  baseCtx: OffscreenCanvasRenderingContext2D,
+  inpaintedCrop: ImageBitmap,
+  cropX: number,
+  cropY: number,
+  cropWidth: number,
+  cropHeight: number,
+  maskRegion: Uint8Array,
+  featherRadius: number
+) {
+  // Get base image data
+  const baseImageData = baseCtx.getImageData(cropX, cropY, cropWidth, cropHeight)
+  const basePixels = baseImageData.data
+
+  // Get inpainted pixels
+  const tempCanvas = new OffscreenCanvas(cropWidth, cropHeight)
+  const tempCtx = tempCanvas.getContext('2d')!
+  tempCtx.drawImage(inpaintedCrop, 0, 0, cropWidth, cropHeight)
+  const inpaintData = tempCtx.getImageData(0, 0, cropWidth, cropHeight)
+  const inpaintPixels = inpaintData.data
+
+  // Simplified gradient-domain blend: mix colors near boundary
+  for (let y = 0; y < cropHeight; y++) {
+    for (let x = 0; x < cropWidth; x++) {
+      const idx = (y * cropWidth + x) * 4
+      const maskVal = maskRegion[y * cropWidth + x]
+
+      if (maskVal < 30) {
+        // Outside mask, keep base
+        continue
+      }
+
+      // Calculate distance to mask edge
+      const distToEdge = computeDistanceToEdge(x, y, cropWidth, cropHeight, maskRegion)
+
+      if (distToEdge < featherRadius) {
+        // Blend zone: mix base and inpaint with smooth transition
+        const blendFactor = distToEdge / featherRadius
+        const smoothBlend = 0.5 - 0.5 * Math.cos(blendFactor * Math.PI)
+
+        basePixels[idx] = Math.round(
+          basePixels[idx] * (1 - smoothBlend) + inpaintPixels[idx] * smoothBlend
+        )
+        basePixels[idx + 1] = Math.round(
+          basePixels[idx + 1] * (1 - smoothBlend) + inpaintPixels[idx + 1] * smoothBlend
+        )
+        basePixels[idx + 2] = Math.round(
+          basePixels[idx + 2] * (1 - smoothBlend) + inpaintPixels[idx + 2] * smoothBlend
+        )
+      } else {
+        // Inner region: full inpaint
+        basePixels[idx] = inpaintPixels[idx]
+        basePixels[idx + 1] = inpaintPixels[idx + 1]
+        basePixels[idx + 2] = inpaintPixels[idx + 2]
+      }
+    }
+  }
+
+  // Write blended result back
+  baseCtx.putImageData(baseImageData, cropX, cropY)
+}
+
+/**
+ * Compute approximate distance to mask edge
+ */
+function computeDistanceToEdge(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  mask: Uint8Array
+): number {
+  let minDist = Infinity
+
+  // Check neighbors in expanding radius
+  for (let r = 1; r <= 10; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const nx = x + dx
+        const ny = y + dy
+
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue
+
+        const nIdx = ny * width + nx
+        if (mask[nIdx] < 30) {
+          // Found edge
+          const dist = Math.sqrt(dx * dx + dy * dy)
+          minDist = Math.min(minDist, dist)
+        }
+      }
+    }
+
+    if (minDist < Infinity) break
+  }
+
+  return minDist === Infinity ? 10 : minDist
 }

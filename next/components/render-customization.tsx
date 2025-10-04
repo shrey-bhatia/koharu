@@ -1,10 +1,11 @@
 'use client'
 
-import { Select, Text } from '@radix-ui/themes'
+import { Select, Text, Badge } from '@radix-ui/themes'
 import { useEditorStore, RGB } from '@/lib/state'
 import { rgbToHex, hexToRgb } from '@/utils/color-extraction'
 import { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { CheckCircle, AlertTriangle } from 'lucide-react'
 
 // Fallback fonts if system fonts fail to load
 const FALLBACK_FONTS = [
@@ -56,9 +57,57 @@ export default function RenderCustomization({ blockIndex, onReProcess }: RenderC
   const bgColor = block.manualBgColor || block.backgroundColor || { r: 255, g: 255, b: 255 }
   const textColor = block.manualTextColor || block.textColor || { r: 0, g: 0, b: 0 }
 
+  // Appearance confidence
+  const hasAppearance = block.appearance
+  const confidence = block.appearance?.confidence || 0
+  const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
+
   return (
     <div className='space-y-3 p-3 border-t border-gray-200 dark:border-gray-700'>
-      <Text className='text-sm font-semibold dark:text-white'>Customize Block #{blockIndex + 1}</Text>
+      <div className='flex items-center justify-between'>
+        <Text className='text-sm font-semibold dark:text-white'>Customize Block #{blockIndex + 1}</Text>
+        {hasAppearance && (
+          <div className='flex items-center gap-1'>
+            {confidence > 0.7 ? (
+              <Badge color='green' size='1'>
+                <CheckCircle className='h-3 w-3' />
+                High Confidence
+              </Badge>
+            ) : confidence > 0.5 ? (
+              <Badge color='blue' size='1'>
+                <AlertTriangle className='h-3 w-3' />
+                Medium
+              </Badge>
+            ) : (
+              <Badge color='yellow' size='1'>
+                <AlertTriangle className='h-3 w-3' />
+                Low Confidence
+              </Badge>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Appearance Analysis Info */}
+      {hasAppearance && (
+        <div className='rounded-md border border-blue-200 bg-blue-50 p-2 text-xs dark:border-blue-800 dark:bg-blue-950'>
+          <Text className='font-semibold text-blue-900 dark:text-blue-100'>
+            Appearance Analysis
+          </Text>
+          <ul className='ml-4 mt-1 list-disc space-y-1 text-blue-800 dark:text-blue-200'>
+            <li>Confidence: {(confidence * 100).toFixed(0)}%</li>
+            {hasOutline && (
+              <li>Outline detected: {block.appearance.outlineWidthPx}px stroke</li>
+            )}
+            {block.maskStats && (
+              <li>
+                Orientation: {block.maskStats.orientationDeg.toFixed(1)}°,
+                Eccentricity: {block.maskStats.eccentricity.toFixed(2)}
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
 
       {/* Background Color */}
       <div className='space-y-1'>

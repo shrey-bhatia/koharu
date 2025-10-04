@@ -94,16 +94,39 @@ export default function GpuStatusPanel() {
 
       {/* Main Status */}
       <div className='mt-3 space-y-3'>
-        {/* Active Provider */}
-        <div className='flex items-center justify-between'>
-          <Text className='text-sm text-gray-600 dark:text-gray-400'>Provider:</Text>
-          <Badge
-            color={isGpuAccelerated && !hasFallback ? 'green' : 'red'}
-            size='2'
-            className='font-mono'
-          >
-            {status.active_provider}
-          </Badge>
+        {/* Active Provider (Highlighted) */}
+        <div className='rounded-md border border-gray-300 bg-gray-50 p-2 dark:border-gray-600 dark:bg-gray-900'>
+          <div className='flex items-center justify-between'>
+            <Text className='text-sm font-semibold text-gray-700 dark:text-gray-300'>
+              Active Provider:
+            </Text>
+            <Badge
+              color={isGpuAccelerated && !hasFallback ? 'green' : 'red'}
+              size='2'
+              className='font-mono'
+            >
+              {status.active_provider}
+            </Badge>
+          </div>
+          <Text className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            This is the execution provider used by the LaMa inpainting session.
+          </Text>
+        </div>
+
+        {/* Available Providers (Expanded by default) */}
+        <div className='rounded-md border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800'>
+          <Text className='text-sm font-semibold text-gray-700 dark:text-gray-300'>
+            Available Providers ({status.available_providers.length})
+          </Text>
+          <ul className='ml-4 mt-2 list-disc space-y-1 text-xs'>
+            {status.available_providers.map((p, i) => (
+              <li key={i} className='font-mono text-gray-600 dark:text-gray-400'>
+                {p}
+                {p === status.requested_provider && ' (requested)'}
+                {p === status.active_provider && ' ← currently active'}
+              </li>
+            ))}
+          </ul>
         </div>
 
         {/* Device Name */}
@@ -129,20 +152,16 @@ export default function GpuStatusPanel() {
           </div>
         </div>
 
-        {/* Available Providers (collapsible) */}
-        <details className='text-xs'>
-          <summary className='cursor-pointer text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'>
-            Available Providers ({status.available_providers.length})
-          </summary>
-          <ul className='ml-4 mt-2 list-disc space-y-1'>
-            {status.available_providers.map((p, i) => (
-              <li key={i} className='font-mono'>
-                {p}
-                {p === status.requested_provider && ' (requested)'}
-              </li>
-            ))}
-          </ul>
-        </details>
+        {/* Profiling Note */}
+        <Callout.Root color='blue' size='1' className='mt-2'>
+          <Callout.Icon>
+            <CheckCircle className='h-4 w-4' />
+          </Callout.Icon>
+          <Callout.Text className='text-xs'>
+            <strong>Provider Verification:</strong> The active provider shown above is captured from the actual LaMa session during warmup.
+            For detailed profiling, enable ONNX Runtime profiling in your environment and check session logs.
+          </Callout.Text>
+        </Callout.Root>
 
         {/* Warning for CPU fallback */}
         {hasFallback && (

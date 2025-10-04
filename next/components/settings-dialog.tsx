@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Dialog, Button, TextField, Text, Callout, Select, Tabs } from '@radix-ui/themes'
 import { Settings, CheckCircle, XCircle } from 'lucide-react'
 import { useEditorStore } from '@/lib/state'
@@ -9,13 +9,15 @@ import { invoke } from '@tauri-apps/api/core'
 import GpuStatusPanel from './gpu-status-panel'
 
 export default function SettingsDialog() {
-  const { translationApiKey, setTranslationApiKey, gpuPreference, setGpuPreference } = useEditorStore()
+  const { translationApiKey, setTranslationApiKey, gpuPreference, setGpuPreference, defaultFont, setDefaultFont } = useEditorStore()
   const [open, setOpen] = useState(false)
   const [apiKeyInput, setApiKeyInput] = useState(translationApiKey || '')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null)
   const [testMessage, setTestMessage] = useState('')
   const [gpuChanged, setGpuChanged] = useState(false)
+  const [systemFonts, setSystemFonts] = useState<string[]>(['Arial'])
+  const [loadingFonts, setLoadingFonts] = useState(true)
 
   const handleTest = async () => {
     if (!apiKeyInput || apiKeyInput.trim().length === 0) {
@@ -80,6 +82,24 @@ export default function SettingsDialog() {
     }
   }
 
+  // Load system fonts when dialog opens
+  useEffect(() => {
+    if (!open) return
+
+    const fetchFonts = async () => {
+      try {
+        const fonts = await invoke<string[]>('get_system_fonts')
+        setSystemFonts(fonts)
+      } catch (error) {
+        console.error('Failed to load system fonts:', error)
+        setSystemFonts(['Arial', 'Helvetica', 'Times New Roman', 'Georgia', 'Verdana'])
+      } finally {
+        setLoadingFonts(false)
+      }
+    }
+    fetchFonts()
+  }, [open])
+
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger>
@@ -97,6 +117,7 @@ export default function SettingsDialog() {
         <Tabs.Root defaultValue='translation'>
           <Tabs.List>
             <Tabs.Trigger value='translation'>Translation</Tabs.Trigger>
+            <Tabs.Trigger value='render'>Render/Text</Tabs.Trigger>
             <Tabs.Trigger value='gpu'>GPU & Performance</Tabs.Trigger>
           </Tabs.List>
 
@@ -174,6 +195,53 @@ export default function SettingsDialog() {
                 <Callout.Text>
                   <strong>Note:</strong> Your API key is stored locally in your browser and never sent
                   anywhere except Google Translation API.
+                </Callout.Text>
+              </Callout.Root>
+            </div>
+          </Tabs.Content>
+
+          {/* Render/Text Tab */}
+          <Tabs.Content value='render'>
+            <div className='mt-4 space-y-4'>
+              <div className='space-y-2'>
+                <label>
+                  <Text as='div' size='2' mb='1' weight='bold'>
+                    Default Font
+                  </Text>
+                  <Select.Root
+                    value={defaultFont}
+                    onValueChange={setDefaultFont}
+                  >
+                    <Select.Trigger className='w-full' placeholder={loadingFonts ? 'Loading fonts...' : 'Select a font'} />
+                    <Select.Content>
+                      {systemFonts.map((font) => (
+                        <Select.Item key={font} value={font}>
+                          <span style={{ fontFamily: font }}>{font}</span>
+                        </Select.Item>
+                      ))}
+                    </Select.Content>
+                  </Select.Root>
+                </label>
+                <Text size='1' className='text-gray-600 dark:text-gray-400'>
+                  This font will be used by default for all translated text. You can override it per block in the customization panel.
+                </Text>
+              </div>
+
+              {/* Font Preview */}
+              <div className='rounded border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900'>
+                <Text size='1' className='text-gray-600 dark:text-gray-400'>Preview:</Text>
+                <div className='mt-2 text-lg' style={{ fontFamily: defaultFont }}>
+                  The quick brown fox jumps over the lazy dog.
+                  <br />
+                  日本語のテキスト
+                </div>
+              </div>
+
+              {/* Info about font availability */}
+              <Callout.Root size='1'>
+                <Callout.Text>
+                  <strong>Note:</strong> Make sure the selected font supports the languages you're translating to.
+                  Not all fonts have complete Unicode coverage.
                 </Callout.Text>
               </Callout.Root>
             </div>

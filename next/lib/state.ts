@@ -19,7 +19,8 @@ export interface InpaintingConfig {
 
   // Blending
   blendingMethod: 'alpha' | 'seamless' | 'auto'
-  seamThreshold: number        // 0-1, default: 0.3 (auto mode trigger)
+  seamThreshold: number        // Edge variance threshold (0-100, default: 30)
+  autoSeamFix: boolean         // Enable automatic seam fix for high-variance edges
 
   // Performance
   batchSize: number            // 1-5, default: 1
@@ -38,7 +39,8 @@ export const INPAINTING_PRESETS: Record<'fast' | 'balanced' | 'quality', Inpaint
     maskDilation: 0,
     featherRadius: 3,
     blendingMethod: 'alpha',
-    seamThreshold: 0.3,
+    seamThreshold: 30,
+    autoSeamFix: false,
     batchSize: 1,
     showDebugOverlays: false,
     exportTriptychs: false,
@@ -51,7 +53,8 @@ export const INPAINTING_PRESETS: Record<'fast' | 'balanced' | 'quality', Inpaint
     maskDilation: 0,
     featherRadius: 5,
     blendingMethod: 'auto',
-    seamThreshold: 0.3,
+    seamThreshold: 30,
+    autoSeamFix: true,
     batchSize: 1,
     showDebugOverlays: false,
     exportTriptychs: false,
@@ -64,11 +67,34 @@ export const INPAINTING_PRESETS: Record<'fast' | 'balanced' | 'quality', Inpaint
     maskDilation: 1,
     featherRadius: 7,
     blendingMethod: 'seamless',
-    seamThreshold: 0.2,
+    seamThreshold: 25,
+    autoSeamFix: true,
     batchSize: 1,
     showDebugOverlays: false,
     exportTriptychs: false,
   },
+}
+
+export interface ColorPalette {
+  color: RGB
+  percentage: number
+}
+
+export interface MaskStats {
+  area: number
+  centroid: [number, number]
+  orientationDeg: number
+  eccentricity: number
+}
+
+export interface AppearanceMetadata {
+  sourceTextColor: RGB
+  sourceBackgroundColor: RGB
+  sourceOutlineColor?: RGB
+  outlineWidthPx?: number
+  textColorPalette?: ColorPalette[]
+  backgroundColorPalette?: ColorPalette[]
+  confidence: number // 0-1, overall confidence in color extraction
 }
 
 export type TextBlock = {
@@ -86,6 +112,7 @@ export type TextBlock = {
   fontSize?: number
   fontFamily?: string
   letterSpacing?: number // in pixels
+  lineHeight?: number // line height multiplier (1.0 = tight, 1.5 = relaxed)
   fontWeight?: number | 'normal' | 'bold' // 100-900 or keywords
   fontStretch?: 'normal' | 'condensed' | 'expanded' // font-stretch values
   // Manual overrides
@@ -93,6 +120,10 @@ export type TextBlock = {
   manualTextColor?: RGB
   // OCR tracking
   ocrStale?: boolean // true if box moved since last OCR
+  // Appearance analysis (immutable, derived from source)
+  appearance?: AppearanceMetadata
+  maskStats?: MaskStats
+  appearanceAnalyzed?: boolean
 }
 
 // Load API key from localStorage (browser/Tauri context)
@@ -119,6 +150,12 @@ const loadGpuPreference = (): 'cuda' | 'directml' | 'cpu' => {
   return (localStorage.getItem('gpu_preference') as 'cuda' | 'directml' | 'cpu') || 'cuda'
 }
 
+// Load default font
+const loadDefaultFont = (): string => {
+  if (typeof window === 'undefined') return 'Arial'
+  return localStorage.getItem('default_font') || 'Arial'
+}
+
 export const useEditorStore = create(
   combine(
     {
@@ -142,6 +179,7 @@ export const useEditorStore = create(
       },
       inpaintingConfig: INPAINTING_PRESETS.balanced,
       inpaintingPreset: 'balanced' as 'fast' | 'balanced' | 'quality' | 'custom',
+      defaultFont: loadDefaultFont(),
     } as {
       image: Image | null
       tool: string
@@ -163,6 +201,7 @@ export const useEditorStore = create(
       }
       inpaintingConfig: InpaintingConfig
       inpaintingPreset: 'fast' | 'balanced' | 'quality' | 'custom'
+      defaultFont: string
     },
     (set) => ({
       setImage: (image: Image | null) => set({ image }),
@@ -216,6 +255,12 @@ export const useEditorStore = create(
           inpaintingConfig: { ...state.inpaintingConfig, ...config },
           inpaintingPreset: 'custom', // Mark as custom when user tweaks
         })),
+      setDefaultFont: (font: string) => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('default_font', font)
+        }
+        set({ defaultFont: font })
+      },
     })
   )
 )

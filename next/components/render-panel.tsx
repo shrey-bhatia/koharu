@@ -7,6 +7,7 @@ import { useEditorStore } from '@/lib/state'
 import { extractBackgroundColor } from '@/utils/color-extraction'
 import { ensureReadableContrast } from '@/utils/wcag-contrast'
 import { calculateOptimalFontSize } from '@/utils/font-sizing'
+import { calculateImprovedFontSize } from '@/utils/improved-font-sizing'
 import { createImageFromBuffer } from '@/lib/image'
 import { invoke } from '@tauri-apps/api/core'
 import RenderCustomization from './render-customization'
@@ -21,7 +22,7 @@ interface GpuStatus {
 }
 
 export default function RenderPanel() {
-  const { image, textBlocks, setTextBlocks, renderMethod, setRenderMethod, inpaintedImage, setPipelineStage, setCurrentStage } = useEditorStore()
+  const { image, textBlocks, setTextBlocks, renderMethod, setRenderMethod, inpaintedImage, setPipelineStage, setCurrentStage, defaultFont } = useEditorStore()
   const [processing, setProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -86,35 +87,72 @@ export default function RenderPanel() {
 
         console.log(`Processing block ${i + 1}/${textBlocks.length}...`)
 
-        // Extract background color from ORIGINAL image border
-        const colors = await extractBackgroundColor(colorSourceImage, block, 10)
+        let backgroundColor, textColor
 
-        // Ensure readable contrast
-        const readable = ensureReadableContrast(
-          colors.backgroundColor,
-          colors.textColor,
-          4.5
-        )
+        // Prefer appearance analysis colors if available and confident
+        if (block.appearance && block.appearance.confidence > 0.5) {
+          backgroundColor = block.appearance.sourceBackgroundColor
+          textColor = block.appearance.sourceTextColor
+          console.log(`Block ${i + 1}: Using appearance analysis (confidence: ${block.appearance.confidence.toFixed(2)})`)
+        } else {
+          // Fallback to ring-based extraction
+          const colors = await extractBackgroundColor(colorSourceImage, block, 10)
+          backgroundColor = colors.backgroundColor
+          textColor = colors.textColor
+          console.log(`Block ${i + 1}: Using fallback color extraction (low confidence)`)
+        }
 
-        // Calculate optimal font size
-        const boxWidth = block.xmax - block.xmin
-        const boxHeight = block.ymax - block.ymin
-        const fontMetrics = calculateOptimalFontSize(
-          block.translatedText,
-          boxWidth,
-          boxHeight,
-          block.fontFamily || 'Arial',
-          0.1
-        )
+        // Apply manual overrides if set
+        if (block.manualBgColor) backgroundColor = block.manualBgColor
+        if (block.manualTextColor) textColor = block.manualTextColor
 
-        console.log(`Block ${i + 1}: bg=${JSON.stringify(readable.bgColor)}, fontSize=${fontMetrics.fontSize}px`)
+        // Ensure readable contrast (only when no manual override)
+        if (!block.manualBgColor && !block.manualTextColor) {
+          const readable = ensureReadableContrast(backgroundColor, textColor, 4.5)
+          backgroundColor = readable.bgColor
+          textColor = readable.textColor
+        }
+
+        // Calculate optimal font size using improved algorithm if mask stats available
+        const fontToUse = block.fontFamily || defaultFont
+        let fontMetrics
+        if (block.maskStats) {
+          fontMetrics = calculateImprovedFontSize(
+            block,
+            block.translatedText,
+            fontToUse
+          )
+          console.log(`Block ${i + 1}: Using improved sizing (layout: ${fontMetrics.alignment})`)
+        } else {
+          // Fallback to classic algorithm
+          const boxWidth = block.xmax - block.xmin
+          const boxHeight = block.ymax - block.ymin
+          const classic = calculateOptimalFontSize(
+            block.translatedText,
+            boxWidth,
+            boxHeight,
+            fontToUse,
+            0.1
+          )
+          fontMetrics = {
+            ...classic,
+            lineHeight: 1.2,
+            letterSpacing: 0,
+            alignment: 'center' as const,
+          }
+          console.log(`Block ${i + 1}: Using fallback sizing (no mask stats)`)
+        }
+
+        console.log(`Block ${i + 1}: bg=${JSON.stringify(backgroundColor)}, fontSize=${fontMetrics.fontSize}px, lineHeight=${fontMetrics.lineHeight}, font=${fontToUse}`)
 
         updated.push({
           ...block,
-          backgroundColor: readable.bgColor,
-          textColor: readable.textColor,
+          backgroundColor,
+          textColor,
           fontSize: fontMetrics.fontSize,
-          fontFamily: block.fontFamily || 'Arial',
+          lineHeight: fontMetrics.lineHeight,
+          letterSpacing: fontMetrics.letterSpacing,
+          fontFamily: fontToUse,
         })
 
         setProgress((i + 1) / textBlocks.length)
@@ -181,16 +219,27 @@ export default function RenderPanel() {
         if (!block.translatedText || !block.fontSize || !block.textColor) continue
 
         const textColor = block.manualTextColor || block.textColor
-        const fontFamily = block.fontFamily || 'Arial'
+        const fontFamily = block.fontFamily || defaultFont
         const fontWeight = block.fontWeight || 'normal'
         const fontStretch = block.fontStretch || 'normal'
         const letterSpacing = block.letterSpacing || 0
+        const lineHeightMultiplier = block.lineHeight || 1.2
 
-        ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
         ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
         ctx.letterSpacing = `${letterSpacing}px`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
+
+        // Configure outline if available from appearance analysis
+        const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
+        if (hasOutline) {
+          ctx.strokeStyle = `rgb(${block.appearance.sourceOutlineColor.r}, ${block.appearance.sourceOutlineColor.g}, ${block.appearance.sourceOutlineColor.b})`
+          ctx.lineWidth = block.appearance.outlineWidthPx
+          ctx.lineJoin = 'round'
+          ctx.miterLimit = 2
+        }
+
+        ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
 
         const boxWidth = block.xmax - block.xmin
         const boxHeight = block.ymax - block.ymin
@@ -216,7 +265,7 @@ export default function RenderPanel() {
         }
         if (currentLine) lines.push(currentLine)
 
-        const lineHeight = block.fontSize * 1.2
+        const lineHeight = block.fontSize * lineHeightMultiplier
         const totalHeight = lines.length * lineHeight
 
         // Start from top if text is too tall, otherwise center vertically
@@ -225,7 +274,15 @@ export default function RenderPanel() {
           : centerY - ((lines.length - 1) * lineHeight) / 2
 
         lines.forEach((line, i) => {
-          ctx.fillText(line, centerX, startY + i * lineHeight, maxWidth)
+          const y = startY + i * lineHeight
+
+          // Draw outline first (if present)
+          if (hasOutline) {
+            ctx.strokeText(line, centerX, y, maxWidth)
+          }
+
+          // Then draw fill on top
+          ctx.fillText(line, centerX, y, maxWidth)
         })
       }
 

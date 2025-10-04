@@ -131,6 +131,11 @@ function Canvas() {
                     const width = xmax - xmin
                     const height = ymax - ymin
 
+                    // Check for outline from appearance analysis
+                    const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
+                    const outlineColor = hasOutline ? block.appearance.sourceOutlineColor : undefined
+                    const outlineWidth = hasOutline ? block.appearance.outlineWidthPx : undefined
+
                     return (
                       <Text
                         key={`translated-${index}`}
@@ -142,6 +147,8 @@ function Canvas() {
                         fontSize={block.fontSize}
                         fontFamily={block.fontFamily || 'Arial'}
                         fill={`rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`}
+                        stroke={outlineColor ? `rgb(${outlineColor.r}, ${outlineColor.g}, ${outlineColor.b})` : undefined}
+                        strokeWidth={outlineWidth}
                         align='center'
                         verticalAlign='middle'
                         wrap='word'

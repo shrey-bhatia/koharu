@@ -5,6 +5,7 @@ import { Play } from 'lucide-react'
 import { Button, Slider, Text } from '@radix-ui/themes'
 import { invoke } from '@tauri-apps/api/core'
 import { useEditorStore } from '@/lib/state'
+import { analyzeTextAppearance } from '@/utils/appearance-analysis'
 
 export default function DetectionPanel() {
   const { image, textBlocks, setTextBlocks, setSegmentationMask } = useEditorStore()
@@ -24,14 +25,27 @@ export default function DetectionPanel() {
 
       console.log('Detection result:', result)
 
-      if (result?.bboxes) {
-        setTextBlocks(result.bboxes)
-      }
+      let blocks = result?.bboxes || []
 
       // Store segmentation mask for inpainting
       if (result?.segment) {
         setSegmentationMask(result.segment)
         console.log('Segmentation mask stored:', result.segment.length, 'bytes')
+
+        // Run appearance analysis automatically
+        if (blocks.length > 0 && image?.bitmap) {
+          console.log('Running appearance analysis on', blocks.length, 'blocks...')
+          const startTime = performance.now()
+
+          blocks = await analyzeTextAppearance(image.bitmap, result.segment, blocks)
+
+          const duration = performance.now() - startTime
+          console.log(`Appearance analysis completed in ${duration.toFixed(2)}ms`)
+        }
+      }
+
+      if (blocks.length > 0) {
+        setTextBlocks(blocks)
       }
     } catch (error) {
       console.error('Error during detection:', error)
