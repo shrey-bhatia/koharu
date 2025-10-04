@@ -472,3 +472,63 @@ pub fn get_current_gpu_status(app: AppHandle) -> CommandResult<crate::state::Gpu
     let init_result = state.gpu_init_result.blocking_lock();
     Ok(init_result.clone())
 }
+
+#[derive(serde::Serialize)]
+pub struct StressTestResult {
+    pub timings_ms: Vec<u64>,
+    pub avg_ms: u64,
+    pub min_ms: u64,
+    pub max_ms: u64,
+    pub target_size: u32,
+    pub iterations: usize,
+}
+
+#[tauri::command]
+pub async fn run_gpu_stress_test(
+    app: AppHandle,
+    iterations: Option<usize>,
+    target_size: Option<u32>,
+) -> CommandResult<StressTestResult> {
+    let state = app.state::<AppState>();
+    let iterations = iterations.unwrap_or(5);
+    let target_size = target_size.unwrap_or(768);
+
+    tracing::info!("Running GPU stress test: {} iterations at {}x{}", iterations, target_size, target_size);
+
+    let mut timings = Vec::new();
+
+    for i in 0..iterations {
+        let start = std::time::Instant::now();
+
+        // Create test images at target size
+        let test_image = image::DynamicImage::new_rgb8(target_size, target_size);
+        let test_mask = image::DynamicImage::new_luma8(target_size, target_size);
+
+        // Run LaMa inference
+        state.lama.lock().await.inference(&test_image, &test_mask)
+            .context(format!("Stress test iteration {} failed", i + 1))?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        timings.push(elapsed);
+
+        tracing::debug!("Stress test iteration {}/{}: {}ms", i + 1, iterations, elapsed);
+    }
+
+    let avg = timings.iter().sum::<u64>() / timings.len() as u64;
+    let min = *timings.iter().min().unwrap();
+    let max = *timings.iter().max().unwrap();
+
+    tracing::info!(
+        "Stress test complete: avg={}ms, min={}ms, max={}ms",
+        avg, min, max
+    );
+
+    Ok(StressTestResult {
+        timings_ms: timings,
+        avg_ms: avg,
+        min_ms: min,
+        max_ms: max,
+        target_size,
+        iterations,
+    })
+}

@@ -1,11 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { Dialog, Button, TextField, Text, Callout, Select } from '@radix-ui/themes'
+import { Dialog, Button, TextField, Text, Callout, Select, Tabs } from '@radix-ui/themes'
 import { Settings, CheckCircle, XCircle } from 'lucide-react'
 import { useEditorStore } from '@/lib/state'
 import { testApiKey } from '@/utils/translation'
 import { invoke } from '@tauri-apps/api/core'
+import GpuStatusPanel from './gpu-status-panel'
 
 export default function SettingsDialog() {
   const { translationApiKey, setTranslationApiKey, gpuPreference, setGpuPreference } = useEditorStore()
@@ -87,13 +88,21 @@ export default function SettingsDialog() {
         </Button>
       </Dialog.Trigger>
 
-      <Dialog.Content maxWidth='450px'>
-        <Dialog.Title>Translation Settings</Dialog.Title>
+      <Dialog.Content maxWidth='600px'>
+        <Dialog.Title>Settings</Dialog.Title>
         <Dialog.Description size='2' mb='4'>
-          Configure your Google Cloud Translation API key for automatic manga translation.
+          Configure translation API and GPU acceleration settings.
         </Dialog.Description>
 
-        <div className='space-y-4'>
+        <Tabs.Root defaultValue='translation'>
+          <Tabs.List>
+            <Tabs.Trigger value='translation'>Translation</Tabs.Trigger>
+            <Tabs.Trigger value='gpu'>GPU & Performance</Tabs.Trigger>
+          </Tabs.List>
+
+          {/* Translation Tab */}
+          <Tabs.Content value='translation'>
+            <div className='mt-4 space-y-4'>
           <div className='space-y-2'>
             <label>
               <Text as='div' size='2' mb='1' weight='bold'>
@@ -160,58 +169,102 @@ export default function SettingsDialog() {
             </Text>
           </div>
 
-          {/* GPU Preference */}
-          <div className='space-y-2'>
-            <label>
-              <Text as='div' size='2' mb='1' weight='bold'>
-                GPU Preference
-              </Text>
-              <Select.Root
-                value={gpuPreference}
-                onValueChange={handleGpuChange}
-              >
-                <Select.Trigger className='w-full' />
-                <Select.Content>
-                  <Select.Item value='cuda'>
-                    <div className='flex flex-col'>
-                      <span className='font-medium'>NVIDIA CUDA (Best Performance)</span>
-                      <span className='text-xs text-gray-500'>Requires NVIDIA GPU with CUDA support</span>
-                    </div>
-                  </Select.Item>
-                  <Select.Item value='directml'>
-                    <div className='flex flex-col'>
-                      <span className='font-medium'>DirectML (Intel/AMD GPU)</span>
-                      <span className='text-xs text-gray-500'>Uses integrated or AMD graphics</span>
-                    </div>
-                  </Select.Item>
-                  <Select.Item value='cpu'>
-                    <div className='flex flex-col'>
-                      <span className='font-medium'>CPU Only (Slowest)</span>
-                      <span className='text-xs text-gray-500'>Fallback option, very slow</span>
-                    </div>
-                  </Select.Item>
-                </Select.Content>
-              </Select.Root>
-            </label>
-          </div>
+              {/* Security notice */}
+              <Callout.Root size='1'>
+                <Callout.Text>
+                  <strong>Note:</strong> Your API key is stored locally in your browser and never sent
+                  anywhere except Google Translation API.
+                </Callout.Text>
+              </Callout.Root>
+            </div>
+          </Tabs.Content>
 
-          {/* GPU change warning */}
-          {gpuChanged && (
-            <Callout.Root color='yellow' size='1'>
-              <Callout.Text>
-                <strong>Restart Required:</strong> GPU preference will apply after restarting the application.
-              </Callout.Text>
-            </Callout.Root>
-          )}
+          {/* GPU Tab */}
+          <Tabs.Content value='gpu'>
+            <div className='mt-4 space-y-4'>
+              {/* GPU Status Panel */}
+              <GpuStatusPanel />
 
-          {/* Security notice */}
-          <Callout.Root size='1'>
-            <Callout.Text>
-              <strong>Note:</strong> Your API key is stored locally in your browser and never sent
-              anywhere except Google Translation API.
-            </Callout.Text>
-          </Callout.Root>
-        </div>
+              {/* GPU Preference Selector */}
+              <div className='space-y-2'>
+                <label>
+                  <Text as='div' size='2' mb='1' weight='bold'>
+                    GPU Preference
+                  </Text>
+                  <Select.Root
+                    value={gpuPreference}
+                    onValueChange={handleGpuChange}
+                  >
+                    <Select.Trigger className='w-full' />
+                    <Select.Content>
+                      <Select.Item value='cuda'>
+                        <div className='flex flex-col'>
+                          <span className='font-medium'>NVIDIA CUDA (Best Performance)</span>
+                          <span className='text-xs text-gray-500'>Requires NVIDIA GPU with CUDA support</span>
+                        </div>
+                      </Select.Item>
+                      <Select.Item value='directml'>
+                        <div className='flex flex-col'>
+                          <span className='font-medium'>DirectML (Intel/AMD GPU)</span>
+                          <span className='text-xs text-gray-500'>Uses integrated or AMD graphics</span>
+                        </div>
+                      </Select.Item>
+                      <Select.Item value='cpu'>
+                        <div className='flex flex-col'>
+                          <span className='font-medium'>CPU Only (Slowest)</span>
+                          <span className='text-xs text-gray-500'>Fallback option, very slow</span>
+                        </div>
+                      </Select.Item>
+                    </Select.Content>
+                  </Select.Root>
+                </label>
+              </div>
+
+              {/* GPU change warning */}
+              {gpuChanged && (
+                <Callout.Root color='yellow' size='1'>
+                  <Callout.Text>
+                    <strong>Restart Required:</strong> GPU preference will apply after restarting the application.
+                  </Callout.Text>
+                </Callout.Root>
+              )}
+
+              {/* Troubleshooting Guide */}
+              <details className='text-sm'>
+                <summary className='cursor-pointer font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100'>
+                  Troubleshooting GPU Issues
+                </summary>
+                <div className='mt-2 space-y-2 text-xs text-gray-600 dark:text-gray-400'>
+                  <div>
+                    <strong>CUDA not working:</strong>
+                    <ul className='ml-4 list-disc'>
+                      <li>Install CUDA Toolkit 12.9 and cuDNN 9.11</li>
+                      <li>Add CUDA bin directories to PATH</li>
+                      <li>Update NVIDIA drivers to latest version</li>
+                      <li>Restart application after installation</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <strong>DirectML slow:</strong>
+                    <ul className='ml-4 list-disc'>
+                      <li>Ensure discrete GPU is selected (not integrated)</li>
+                      <li>Update GPU drivers</li>
+                      <li>Close other GPU-intensive applications</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <strong>Verify GPU usage:</strong>
+                    <ul className='ml-4 list-disc'>
+                      <li>Run stress test above - should show &lt;800ms avg for CUDA</li>
+                      <li>Check Task Manager → Performance → GPU during inpainting</li>
+                      <li>Look for "possible CPU fallback" warning in status</li>
+                    </ul>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </Tabs.Content>
+        </Tabs.Root>
 
         <div className='mt-6 flex justify-end gap-3'>
           <Dialog.Close>

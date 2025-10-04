@@ -7,6 +7,7 @@ use serde::Serialize;
 #[derive(Clone, Serialize, Debug)]
 pub struct GpuInitResult {
     pub requested_provider: String,
+    pub available_providers: Vec<String>,  // NEW: All available ORT providers
     pub active_provider: String,
     pub device_id: u32,
     pub device_name: Option<String>,

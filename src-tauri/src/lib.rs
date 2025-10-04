@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use std::fs;
 
 use crate::{
-    commands::{detection, ocr, get_system_fonts, inpaint_region, set_gpu_preference, get_gpu_devices, get_current_gpu_status},
+    commands::{detection, ocr, get_system_fonts, inpaint_region, set_gpu_preference, get_gpu_devices, get_current_gpu_status, run_gpu_stress_test},
     state::{AppState, GpuInitResult},
 };
 
@@ -50,6 +50,48 @@ fn get_cuda_device_name(_device_id: u32) -> Option<String> {
     None
 }
 
+// Get list of available ORT providers
+fn get_available_ort_providers() -> Vec<String> {
+    // ORT doesn't expose a clean API for this yet, so we introspect based on build features
+    let mut providers = vec!["CPU".to_string()];
+
+    #[cfg(feature = "cuda")]
+    {
+        // CUDA is available if feature is enabled and driver is present
+        if let Some(_) = get_cuda_device_name(0) {
+            providers.push("CUDA".to_string());
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        // DirectML is available on Windows 10+
+        providers.push("DirectML".to_string());
+    }
+
+    providers
+}
+
+// Get GPU adapter info using wgpu (works for DirectML)
+fn get_wgpu_adapter_name(device_id: u32) -> Option<String> {
+    use wgpu::{Instance, InstanceDescriptor, Backends};
+
+    let instance = Instance::new(InstanceDescriptor {
+        backends: Backends::all(),
+        ..Default::default()
+    });
+
+    // enumerate_adapters returns Vec<Adapter>, not an iterator
+    let adapters = instance.enumerate_adapters(Backends::all());
+
+    if let Some(adapter) = adapters.get(device_id as usize) {
+        let info = adapter.get_info();
+        Some(format!("{} ({:?})", info.name, info.backend))
+    } else {
+        None
+    }
+}
+
 // Initialize models with GPU verification
 async fn initialize(app: AppHandle) -> anyhow::Result<()> {
     let gpu_pref = read_gpu_preference(&app);
@@ -57,8 +99,13 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
 
     tracing::info!("GPU Preference: {} (device {})", gpu_pref, device_id);
 
+    // Query available providers before init
+    let available_providers = get_available_ort_providers();
+    tracing::info!("Available ORT providers: {:?}", available_providers);
+
     let mut init_result = GpuInitResult {
         requested_provider: gpu_pref.clone(),
+        available_providers: available_providers.clone(),
         active_provider: "Unknown".to_string(),
         device_id,
         device_name: None,
@@ -66,7 +113,35 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
         warmup_time_ms: 0,
     };
 
-    // Initialize ORT with requested provider
+    // FAIL FAST: Verify requested provider is available before init
+    match gpu_pref.as_str() {
+        "cuda" => {
+            #[cfg(not(feature = "cuda"))]
+            {
+                return Err(anyhow::anyhow!(
+                    "CUDA requested but not compiled. Rebuild with --features cuda"
+                ));
+            }
+            #[cfg(feature = "cuda")]
+            {
+                if !available_providers.iter().any(|p| p == "CUDA") {
+                    return Err(anyhow::anyhow!(
+                        "CUDA requested but not available. Check NVIDIA drivers and CUDA toolkit installation.\nAvailable providers: {:?}",
+                        available_providers
+                    ));
+                }
+            }
+        }
+        "directml" => {
+            #[cfg(not(windows))]
+            {
+                return Err(anyhow::anyhow!("DirectML only available on Windows"));
+            }
+        }
+        _ => {}
+    }
+
+    // Initialize ORT with ONLY the requested provider (no silent fallback)
     match gpu_pref.as_str() {
         "cuda" => {
             #[cfg(feature = "cuda")]
@@ -76,17 +151,13 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
                         ort::execution_providers::CUDAExecutionProvider::default()
                             .with_device_id(device_id as i32)
                             .build()
-                            .error_on_failure(),
+                            .error_on_failure(), // CRITICAL: Fail hard if CUDA unavailable
                     ])
                     .commit()?;
                 init_result.active_provider = "CUDA".to_string();
                 init_result.device_name = get_cuda_device_name(device_id);
                 init_result.success = true;
-                tracing::info!("Initialized ORT with CUDA on device {}", device_id);
-            }
-            #[cfg(not(feature = "cuda"))]
-            {
-                return Err(anyhow::anyhow!("CUDA requested but not compiled. Rebuild with --features cuda"));
+                tracing::info!("✓ Initialized ORT with CUDA on device {}", device_id);
             }
         }
         "directml" => {
@@ -100,13 +171,10 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
                     ])
                     .commit()?;
                 init_result.active_provider = "DirectML".to_string();
-                init_result.device_name = Some(format!("Adapter {}", device_id));
+                // Use wgpu to get actual adapter name instead of generic "Adapter 0"
+                init_result.device_name = get_wgpu_adapter_name(device_id);
                 init_result.success = true;
-                tracing::info!("Initialized ORT with DirectML");
-            }
-            #[cfg(not(windows))]
-            {
-                return Err(anyhow::anyhow!("DirectML only available on Windows"));
+                tracing::info!("✓ Initialized ORT with DirectML");
             }
         }
         "cpu" | _ => {
@@ -117,7 +185,7 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
                 .commit()?;
             init_result.active_provider = "CPU".to_string();
             init_result.success = true;
-            tracing::info!("Initialized ORT with CPU");
+            tracing::info!("✓ Initialized ORT with CPU");
         }
     }
 
@@ -126,11 +194,11 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
     let manga_ocr = MangaOCR::new()?;
     let mut lama = Lama::new()?;
 
-    // Run warmup profiling
+    // Run warmup profiling to verify GPU is actually used
     tracing::info!("Running warmup profiling...");
     let start = std::time::Instant::now();
 
-    // Create dummy 512x512 input for LaMa
+    // Create dummy 512x512 input for LaMa warmup
     let dummy_image = image::DynamicImage::new_rgb8(512, 512);
     let dummy_mask = image::DynamicImage::new_luma8(512, 512);
 
@@ -142,10 +210,29 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
 
     tracing::info!("Warmup completed in {}ms", init_result.warmup_time_ms);
 
-    // Detect potential CPU fallback
-    if init_result.warmup_time_ms > 1000 && gpu_pref != "cpu" {
-        tracing::warn!("Warmup took {}ms - possible CPU fallback!", init_result.warmup_time_ms);
-        init_result.active_provider = format!("{} (suspected CPU fallback)", init_result.active_provider);
+    // Detect potential CPU fallback based on warmup latency
+    // CUDA should be <500ms, DirectML <800ms, CPU >2000ms
+    let expected_max_time = match gpu_pref.as_str() {
+        "cuda" => 800,      // CUDA warmup should be fast
+        "directml" => 1200, // DirectML slightly slower
+        "cpu" => u32::MAX,  // CPU is expected to be slow
+        _ => u32::MAX,
+    };
+
+    if init_result.warmup_time_ms > expected_max_time {
+        tracing::warn!(
+            "⚠️  Warmup took {}ms (expected <{}ms) - possible CPU fallback!",
+            init_result.warmup_time_ms,
+            expected_max_time
+        );
+        init_result.active_provider = format!("{} (possible CPU fallback)", init_result.active_provider);
+        init_result.success = false; // Mark as failed
+    } else {
+        tracing::info!(
+            "✓ GPU acceleration verified: {}ms warmup (expected <{}ms)",
+            init_result.warmup_time_ms,
+            expected_max_time
+        );
     }
 
     app.manage(AppState {
@@ -185,7 +272,7 @@ pub fn run() -> anyhow::Result<()> {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![detection, ocr, get_system_fonts, inpaint_region, set_gpu_preference, get_gpu_devices, get_current_gpu_status])
+        .invoke_handler(tauri::generate_handler![detection, ocr, get_system_fonts, inpaint_region, set_gpu_preference, get_gpu_devices, get_current_gpu_status, run_gpu_stress_test])
         .run(tauri::generate_context!())?;
 
     Ok(())
