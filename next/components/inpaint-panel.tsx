@@ -18,14 +18,13 @@ interface InpaintedRegion {
 }
 
 export default function InpaintPanel() {
-  const { image, segmentationMask, textBlocks, setInpaintedImage, renderMethod, setPipelineStage, setCurrentStage } = useEditorStore()
+  const { image, segmentationMask, textBlocks, setInpaintedImage, renderMethod, setPipelineStage, setCurrentStage, inpaintingConfig } = useEditorStore()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [progress, setProgress] = useState(0)
   const [currentBlock, setCurrentBlock] = useState(0)
   const [cancelled, setCancelled] = useState(false)
-  const [debugMode, setDebugMode] = useState(false)
 
   const runInpaint = async () => {
     if (!image || !segmentationMask || textBlocks.length === 0) {
@@ -107,8 +106,15 @@ export default function InpaintPanel() {
             xmax: block.xmax,
             ymax: block.ymax,
           },
-          padding: 40,  // Option 2: Increased padding for better context
-          debugMode,     // Enable debug triptych exports
+          config: {
+            padding: inpaintingConfig.padding,
+            targetSize: inpaintingConfig.targetSize,
+            maskThreshold: inpaintingConfig.maskThreshold,
+            maskErosion: inpaintingConfig.maskErosion,
+            maskDilation: inpaintingConfig.maskDilation,
+            featherRadius: inpaintingConfig.featherRadius,
+            debugMode: inpaintingConfig.exportTriptychs,
+          },
         })
 
         const blob = new Blob([new Uint8Array(result.image)])
@@ -171,8 +177,15 @@ export default function InpaintPanel() {
             xmax: block.xmax,
             ymax: block.ymax,
           },
-          padding: 50,
-          debugMode,     // Enable debug triptych exports
+          config: {
+            padding: inpaintingConfig.padding,
+            targetSize: inpaintingConfig.targetSize,
+            maskThreshold: inpaintingConfig.maskThreshold,
+            maskErosion: inpaintingConfig.maskErosion,
+            maskDilation: inpaintingConfig.maskDilation,
+            featherRadius: inpaintingConfig.featherRadius,
+            debugMode: inpaintingConfig.exportTriptychs,
+          },
         })
 
         const blob = new Blob([new Uint8Array(result.image)])
@@ -190,7 +203,7 @@ export default function InpaintPanel() {
           segmentationMask!,
           image!.bitmap.width,
           image!.bitmap.height,
-          5 // feather radius
+          inpaintingConfig.featherRadius
         )
 
         setProgress((i + 1) / textBlocks.length)
@@ -269,21 +282,14 @@ export default function InpaintPanel() {
             </span>
           </div>
         </div>
-        
-        {/* Debug Mode Toggle */}
-        <div className='flex items-center justify-between text-sm'>
-          <label className='flex items-center gap-2 cursor-pointer'>
-            <input
-              type='checkbox'
-              checked={debugMode}
-              onChange={(e) => setDebugMode(e.target.checked)}
-              className='rounded'
-            />
-            <span>Debug Mode</span>
-          </label>
-          {debugMode && (
-            <Text size='1' color='gray'>Saves triptych images</Text>
-          )}
+
+        {/* Config Info */}
+        <div className='text-xs text-gray-600 dark:text-gray-400'>
+          <p>
+            Using <strong>{inpaintingConfig.targetSize}px</strong> resolution,{' '}
+            <strong>{inpaintingConfig.padding}px</strong> padding,{' '}
+            <strong>{inpaintingConfig.maskErosion}px</strong> erosion
+          </p>
         </div>
 
         {/* Error */}

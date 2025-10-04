@@ -65,9 +65,14 @@ export default function RenderPanel() {
     try {
       const updated = []
 
-      // CRITICAL FIX: Always extract colors from ORIGINAL image
+      // PIPELINE SAFETY GUARDRAIL #1: Always extract colors from ORIGINAL image
       // Never use inpainted image for color extraction (it's already white!)
       const colorSourceImage = image.bitmap
+
+      // Assertion: Verify we're not accidentally using inpainted image
+      if (renderMethod === 'rectangle' && inpaintedImage) {
+        console.warn('[SAFETY] Rectangle mode detected with inpainted image. Using ORIGINAL for color sampling (correct).')
+      }
 
       for (let i = 0; i < textBlocks.length; i++) {
         const block = textBlocks[i]
@@ -142,8 +147,10 @@ export default function RenderPanel() {
       // 1. Draw base image (original or textless)
       ctx.drawImage(baseImage, 0, 0)
 
-      // 2. Draw rounded rectangles (ONLY for Rectangle Fill mode)
+      // PIPELINE SAFETY GUARDRAIL #2: Draw rectangles ONLY for Rectangle Fill mode
+      // LaMa/NewLaMa modes render text directly over textless plate
       if (renderMethod === 'rectangle') {
+        console.log('[PIPELINE] Drawing rectangles for Rectangle Fill mode')
         for (const block of textBlocks) {
           if (!block.backgroundColor) continue
 
@@ -159,6 +166,8 @@ export default function RenderPanel() {
           ctx.roundRect(x, y, width, height, radius)
           ctx.fill()
         }
+      } else {
+        console.log('[PIPELINE] Skipping rectangles for LaMa/NewLaMa mode (using textless plate)')
       }
 
       // Save 'withRectangles' stage (base + backgrounds, no text yet)

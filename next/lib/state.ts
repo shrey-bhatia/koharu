@@ -8,6 +8,69 @@ export interface RGB {
   b: number
 }
 
+export interface InpaintingConfig {
+  // Core quality parameters
+  padding: number              // 15-100px, default: 50
+  targetSize: number           // 256/384/512/768/1024, default: 512
+  maskThreshold: number        // 20-50, default: 30
+  maskErosion: number          // 0-10px, default: 3
+  maskDilation: number         // 0-5px, default: 0
+  featherRadius: number        // 0-15px, default: 5
+
+  // Blending
+  blendingMethod: 'alpha' | 'seamless' | 'auto'
+  seamThreshold: number        // 0-1, default: 0.3 (auto mode trigger)
+
+  // Performance
+  batchSize: number            // 1-5, default: 1
+
+  // Debug
+  showDebugOverlays: boolean
+  exportTriptychs: boolean
+}
+
+export const INPAINTING_PRESETS: Record<'fast' | 'balanced' | 'quality', InpaintingConfig> = {
+  fast: {
+    padding: 30,
+    targetSize: 384,
+    maskThreshold: 30,
+    maskErosion: 2,
+    maskDilation: 0,
+    featherRadius: 3,
+    blendingMethod: 'alpha',
+    seamThreshold: 0.3,
+    batchSize: 1,
+    showDebugOverlays: false,
+    exportTriptychs: false,
+  },
+  balanced: {
+    padding: 50,
+    targetSize: 512,
+    maskThreshold: 30,
+    maskErosion: 3,
+    maskDilation: 0,
+    featherRadius: 5,
+    blendingMethod: 'auto',
+    seamThreshold: 0.3,
+    batchSize: 1,
+    showDebugOverlays: false,
+    exportTriptychs: false,
+  },
+  quality: {
+    padding: 80,
+    targetSize: 768,
+    maskThreshold: 30,
+    maskErosion: 4,
+    maskDilation: 1,
+    featherRadius: 7,
+    blendingMethod: 'seamless',
+    seamThreshold: 0.2,
+    batchSize: 1,
+    showDebugOverlays: false,
+    exportTriptychs: false,
+  },
+}
+
 export type TextBlock = {
   xmin: number
   ymin: number
@@ -77,6 +140,8 @@ export const useEditorStore = create(
         withRectangles: null,
         final: null,
       },
+      inpaintingConfig: INPAINTING_PRESETS.balanced,
+      inpaintingPreset: 'balanced' as 'fast' | 'balanced' | 'quality' | 'custom',
     } as {
       image: Image | null
       tool: string
@@ -96,6 +161,8 @@ export const useEditorStore = create(
         withRectangles: Image | null
         final: Image | null
       }
+      inpaintingConfig: InpaintingConfig
+      inpaintingPreset: 'fast' | 'balanced' | 'quality' | 'custom'
     },
     (set) => ({
       setImage: (image: Image | null) => set({ image }),
@@ -138,6 +205,16 @@ export const useEditorStore = create(
       setPipelineStage: (stage: 'original' | 'textless' | 'withRectangles' | 'final', image: Image | null) =>
         set((state) => ({
           pipelineStages: { ...state.pipelineStages, [stage]: image },
+        })),
+      setInpaintingPreset: (preset: 'fast' | 'balanced' | 'quality') =>
+        set({
+          inpaintingConfig: INPAINTING_PRESETS[preset],
+          inpaintingPreset: preset,
+        }),
+      setInpaintingConfig: (config: Partial<InpaintingConfig>) =>
+        set((state) => ({
+          inpaintingConfig: { ...state.inpaintingConfig, ...config },
+          inpaintingPreset: 'custom', // Mark as custom when user tweaks
         })),
     })
   )

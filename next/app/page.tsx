@@ -8,6 +8,7 @@ import Canvas from '@/components/canvas'
 import OCRPanel from '@/components/ocr-panel'
 import TranslationPanel from '@/components/translation-panel'
 import InpaintPanel from '@/components/inpaint-panel'
+import InpaintSettings from '@/components/inpaint-settings'
 import RenderPanel from '@/components/render-panel'
 import { useEditorStore } from '@/lib/state'
 
@@ -41,7 +42,12 @@ function App() {
             </>
           )}
           {selectedTool === 'translation' && <TranslationPanel />}
-          {selectedTool === 'inpaint' && <InpaintPanel />}
+          {selectedTool === 'inpaint' && (
+            <>
+              <InpaintSettings />
+              <InpaintPanel />
+            </>
+          )}
           {selectedTool === 'render' && <RenderPanel />}
         </div>
       </div>

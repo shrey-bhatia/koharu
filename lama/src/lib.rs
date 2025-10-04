@@ -103,17 +103,19 @@ impl Lama {
         Ok(Lama { model })
     }
 
-    pub fn inference(
+    pub fn inference_with_size(
         &mut self,
         image: &DynamicImage,
         mask: &DynamicImage,
+        target_size: u32,
     ) -> anyhow::Result<DynamicImage> {
         let (orig_width, orig_height) = image.dimensions();
         let (image, resize_info) =
-            resize_with_padding(&image, 512, image::imageops::FilterType::CatmullRom);
-        let (mask, _) = resize_with_padding(&mask, 512, image::imageops::FilterType::CatmullRom);
+            resize_with_padding(&image, target_size, image::imageops::FilterType::CatmullRom);
+        let (mask, _) = resize_with_padding(&mask, target_size, image::imageops::FilterType::CatmullRom);
 
-        let mut image_data = ndarray::Array::zeros((1, 3, 512, 512));
+        let size = target_size as usize;
+        let mut image_data = ndarray::Array::zeros((1, 3, size, size));
         for pixel in image.pixels() {
             let (x, y, pixel) = pixel;
             let x = x as usize;
@@ -125,8 +127,8 @@ impl Lama {
             image_data[[0, 2, y, x]] = (pixel[2] as f32) / 255.0;
         }
 
-        // Fixed mask interpretation - black pixels (0) are now the area TO inpaint (value 1.0)
-        let mut mask_data = ndarray::Array::zeros((1, 1, 512, 512));
+        // Fixed mask interpretation - white pixels (>0) are the area TO inpaint (value 1.0)
+        let mut mask_data = ndarray::Array::zeros((1, 1, size, size));
 
         for pixel in mask.pixels() {
             let (x, y, pixel) = pixel;
@@ -145,13 +147,13 @@ impl Lama {
         let output = outputs["output"].try_extract_array::<f32>()?;
         let output = output.view();
 
-        let mut output_image = image::RgbImage::new(512, 512);
-        for y in 0..512 {
-            for x in 0..512 {
-                let r = (output[[0, 0, y, x]] * 255.0).clamp(0.0, 255.0).round() as u8;
-                let g = (output[[0, 1, y, x]] * 255.0).clamp(0.0, 255.0).round() as u8;
-                let b = (output[[0, 2, y, x]] * 255.0).clamp(0.0, 255.0).round() as u8;
-                output_image.put_pixel(x as u32, y as u32, image::Rgb([r, g, b]));
+        let mut output_image = image::RgbImage::new(target_size, target_size);
+        for y in 0..target_size {
+            for x in 0..target_size {
+                let r = (output[[0, 0, y as usize, x as usize]] * 255.0).clamp(0.0, 255.0).round() as u8;
+                let g = (output[[0, 1, y as usize, x as usize]] * 255.0).clamp(0.0, 255.0).round() as u8;
+                let b = (output[[0, 2, y as usize, x as usize]] * 255.0).clamp(0.0, 255.0).round() as u8;
+                output_image.put_pixel(x, y, image::Rgb([r, g, b]));
             }
         }
 
@@ -164,5 +166,14 @@ impl Lama {
         );
 
         Ok(output_image)
+    }
+
+    /// Legacy inference function (uses 512px by default for backward compatibility)
+    pub fn inference(
+        &mut self,
+        image: &DynamicImage,
+        mask: &DynamicImage,
+    ) -> anyhow::Result<DynamicImage> {
+        self.inference_with_size(image, mask, 512)
     }
 }
