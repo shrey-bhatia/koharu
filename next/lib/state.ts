@@ -72,7 +72,7 @@ export const useEditorStore = create(
       segmentationMask: number[] | null
       inpaintedImage: Image | null
       theme: 'light' | 'dark'
-      renderMethod: 'rectangle' | 'lama'
+      renderMethod: 'rectangle' | 'lama' | 'newlama'
       selectedBlockIndex: number | null
     },
     (set) => ({
@@ -99,7 +99,7 @@ export const useEditorStore = create(
         }
         set({ theme })
       },
-      setRenderMethod: (method: 'rectangle' | 'lama') => {
+      setRenderMethod: (method: 'rectangle' | 'lama' | 'newlama') => {
         if (typeof window !== 'undefined') {
           localStorage.setItem('render_method', method)
         }

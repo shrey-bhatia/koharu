@@ -7,6 +7,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useEditorStore } from '@/lib/state'
 import { imageBitmapToArrayBuffer, maskToArrayBuffer } from '@/utils/image'
 import { createImageFromBuffer } from '@/lib/image'
+import { compositeMaskedRegion } from '@/utils/alpha-compositing'
 
 interface InpaintedRegion {
   image: number[]
@@ -31,7 +32,9 @@ export default function InpaintPanel() {
       return
     }
 
-    if (renderMethod === 'lama') {
+    if (renderMethod === 'newlama') {
+      await runNewLamaInpainting()
+    } else if (renderMethod === 'lama') {
       await runLocalizedInpainting()
     } else {
       await runFullInpainting()
@@ -124,6 +127,79 @@ export default function InpaintPanel() {
     }
   }
 
+  const runNewLamaInpainting = async () => {
+    setLoading(true)
+    setError(null)
+    setSuccess(false)
+    setProgress(0)
+    setCancelled(false)
+
+    try {
+      const imageBuffer = await imageBitmapToArrayBuffer(image!.bitmap)
+      const maskBuffer = await maskToArrayBuffer(segmentationMask!)
+
+      // Create canvas at original resolution
+      const canvas = new OffscreenCanvas(image!.bitmap.width, image!.bitmap.height)
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(image!.bitmap, 0, 0)
+
+      // Process each text block with mask-based compositing
+      for (let i = 0; i < textBlocks.length; i++) {
+        if (cancelled) break
+
+        setCurrentBlock(i + 1)
+        const block = textBlocks[i]
+
+        const blockWidth = block.xmax - block.xmin
+        const blockHeight = block.ymax - block.ymin
+        if (blockWidth < 20 || blockHeight < 20) continue
+
+        const result = await invoke<InpaintedRegion>('inpaint_region', {
+          image: Array.from(new Uint8Array(imageBuffer)),
+          mask: Array.from(new Uint8Array(maskBuffer)),
+          bbox: {
+            xmin: block.xmin,
+            ymin: block.ymin,
+            xmax: block.xmax,
+            ymax: block.ymax,
+          },
+          padding: 25,
+        })
+
+        const blob = new Blob([new Uint8Array(result.image)])
+        const bitmap = await createImageBitmap(blob)
+
+        // *** CRITICAL: Alpha-blended compositing with feathering ***
+        await compositeMaskedRegion(
+          ctx,
+          bitmap,
+          result.x,
+          result.y,
+          result.width,
+          result.height,
+          block,
+          segmentationMask!,
+          image!.bitmap.width,
+          image!.bitmap.height,
+          5 // feather radius
+        )
+
+        setProgress((i + 1) / textBlocks.length)
+      }
+
+      const finalBlob = await canvas.convertToBlob({ type: 'image/png' })
+      const finalBuffer = await finalBlob.arrayBuffer()
+      const finalImage = await createImageFromBuffer(finalBuffer)
+      setInpaintedImage(finalImage)
+      setSuccess(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'NewLaMa inpainting failed')
+    } finally {
+      setLoading(false)
+      setCurrentBlock(0)
+    }
+  }
+
   return (
     <div className='flex w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md'>
       {/* Header */}
@@ -191,8 +267,8 @@ export default function InpaintPanel() {
           </Callout.Root>
         )}
 
-        {/* Progress for localized inpainting */}
-        {loading && renderMethod === 'lama' && (
+        {/* Progress for localized/newlama inpainting */}
+        {loading && (renderMethod === 'lama' || renderMethod === 'newlama') && (
           <div className='space-y-2'>
             <Progress value={progress * 100} />
             <p className='text-sm text-gray-600'>
@@ -206,7 +282,7 @@ export default function InpaintPanel() {
         )}
 
         {/* Loading info for full inpainting */}
-        {loading && renderMethod !== 'lama' && (
+        {loading && renderMethod !== 'lama' && renderMethod !== 'newlama' && (
           <div className='text-sm text-gray-600'>
             <p>Processing with LaMa AI model...</p>
             <p className='text-xs'>This may take 5-15 seconds depending on image size.</p>
@@ -220,7 +296,8 @@ export default function InpaintPanel() {
               <strong>How it works:</strong>
               <ul className='ml-4 mt-1 list-disc text-xs'>
                 <li><strong>Rectangle mode:</strong> Instant, uses full image inpainting</li>
-                <li><strong>LaMa mode:</strong> Processes each text region individually (~5-10s per block)</li>
+                <li><strong>LaMa mode:</strong> Processes regions individually (basic compositing)</li>
+                <li><strong>NewLaMa mode:</strong> Mask-based compositing - preserves lineart & detail</li>
                 <li>Switch modes in Render panel</li>
               </ul>
             </Callout.Text>

@@ -224,7 +224,7 @@ export default function RenderPanel() {
         <label className='text-xs font-semibold text-gray-600 dark:text-gray-400'>
           Rendering Method
         </label>
-        <Select.Root value={renderMethod} onValueChange={(value: 'rectangle' | 'lama') => setRenderMethod(value)}>
+        <Select.Root value={renderMethod} onValueChange={(value: 'rectangle' | 'lama' | 'newlama') => setRenderMethod(value)}>
           <Select.Trigger className='w-full' />
           <Select.Content>
             <Select.Item value='rectangle'>
@@ -235,8 +235,14 @@ export default function RenderPanel() {
             </Select.Item>
             <Select.Item value='lama'>
               <div className='flex flex-col'>
-                <span className='font-medium'>LaMa AI (Quality)</span>
-                <span className='text-xs text-gray-500'>Slow, requires GPU, best results</span>
+                <span className='font-medium'>LaMa AI (Basic)</span>
+                <span className='text-xs text-gray-500'>Per-region inpainting, basic compositing</span>
+              </div>
+            </Select.Item>
+            <Select.Item value='newlama'>
+              <div className='flex flex-col'>
+                <span className='font-medium'>NewLaMa (Best Quality)</span>
+                <span className='text-xs text-gray-500'>Mask-based compositing, preserves lineart & detail</span>
               </div>
             </Select.Item>
           </Select.Content>

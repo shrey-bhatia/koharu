@@ -613,5 +613,180 @@ Add section to this file:
 
 ---
 
+---
+
+## 🎨 Pending Features (2025-10-04)
+
+### GPU Selection UI
+**Priority**: Medium
+**Rationale**: Currently ORT auto-selects GPU (may use iGPU instead of dedicated NVIDIA GPU), causing suboptimal performance.
+
+**Implementation Plan**:
+
+1. **Add State**:
+```typescript
+// next/lib/state.ts
+executionProvider: 'cuda' | 'directml' | 'cpu'
+```
+
+2. **Settings UI**:
+- Add dropdown in settings panel
+- Options:
+  - "NVIDIA CUDA (Best Performance)" - Forces CUDA
+  - "DirectML (Intel/AMD GPU)" - Uses iGPU
+  - "CPU Only (Slowest)" - Fallback
+- Store preference in localStorage
+
+3. **Backend Integration**:
+```rust
+// src-tauri/src/lib.rs
+// Challenge: ORT initialization happens once on startup
+// Solution Options:
+//   A) Apply preference on next app restart (simplest)
+//   B) Hot-reload models (complex, requires Session::drop + reload)
+//   C) Create multiple sessions with different providers (memory intensive)
+```
+
+4. **Recommended Approach**:
+- Store preference in localStorage
+- Show toast: "GPU preference will apply on next app restart"
+- On startup, read preference and configure ORT accordingly
+- Add `.error_on_failure()` for CUDA to prevent silent fallback
+
+**Files to Modify**:
+- `next/lib/state.ts`
+- `next/components/settings-dialog.tsx` (if exists) or create
+- `src-tauri/src/lib.rs` - Read preference from frontend via Tauri command
+- `src-tauri/src/commands.rs` - Add `get_gpu_preference()` command
+
+**Time Estimate**: 2-3 hours
+
+---
+
+### Text Stroke/Outline Feature
+**Priority**: High
+**Rationale**: Improves text readability on complex backgrounds (gradients, patterns, screentones).
+
+**Implementation Plan**:
+
+1. **Add State Fields**:
+```typescript
+// next/lib/state.ts - Update TextBlock type
+export type TextBlock = {
+  // ... existing fields
+  strokeColor?: RGB        // Outline color (default: black or white based on text color)
+  strokeWidth?: number     // Outline thickness in pixels (0-10, default: 2)
+}
+```
+
+2. **UI Controls** (`next/components/render-customization.tsx`):
+```typescript
+{/* Stroke Color */}
+<div className='space-y-1'>
+  <label>Outline Color</label>
+  <input
+    type='color'
+    value={rgbToHex(block.strokeColor || { r: 0, g: 0, b: 0 })}
+    onChange={(e) => updateBlock({ strokeColor: hexToRgb(e.target.value) })}
+  />
+</div>
+
+{/* Stroke Width */}
+<div className='space-y-1'>
+  <label>Outline Width: {block.strokeWidth || 0}px</label>
+  <input
+    type='range'
+    min='0'
+    max='10'
+    step='0.5'
+    value={block.strokeWidth || 0}
+    onChange={(e) => updateBlock({ strokeWidth: parseFloat(e.target.value) })}
+  />
+</div>
+```
+
+3. **Canvas Export** (`next/components/render-panel.tsx` - exportImage function):
+```typescript
+// Draw text with stroke
+for (const block of textBlocks) {
+  if (!block.translatedText) continue
+
+  const textColor = block.manualTextColor || block.textColor
+  const strokeColor = block.strokeColor || { r: 0, g: 0, b: 0 } // Default black
+  const strokeWidth = block.strokeWidth || 0
+
+  ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
+  ctx.letterSpacing = `${letterSpacing}px`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+
+  const centerX = (block.xmin + block.xmax) / 2
+  const centerY = (block.ymin + block.ymax) / 2
+
+  // Draw stroke FIRST (underneath)
+  if (strokeWidth > 0) {
+    ctx.strokeStyle = `rgb(${strokeColor.r}, ${strokeColor.g}, ${strokeColor.b})`
+    ctx.lineWidth = strokeWidth * 2 // Double for outer stroke effect
+    ctx.lineJoin = 'round'  // Smooth corners
+    ctx.miterLimit = 2
+
+    // Stroke each line
+    lines.forEach((line, i) => {
+      ctx.strokeText(line, centerX, startY + i * lineHeight, maxWidth)
+    })
+  }
+
+  // Draw fill text SECOND (on top)
+  ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
+  lines.forEach((line, i) => {
+    ctx.fillText(line, centerX, startY + i * lineHeight, maxWidth)
+  })
+}
+```
+
+4. **Live Preview** (Update existing preview in render-customization.tsx):
+```typescript
+<div
+  className='preview'
+  style={{
+    fontFamily: block.fontFamily || 'Arial',
+    fontSize: block.fontSize || 16,
+    letterSpacing: `${block.letterSpacing || 0}px`,
+    fontWeight: block.fontWeight || 'normal',
+    fontStretch: block.fontStretch || 'normal',
+    color: rgbToHex(block.manualTextColor || block.textColor || {r:0,g:0,b:0}),
+    // CSS text-stroke for preview (not perfect but close)
+    WebkitTextStroke: block.strokeWidth
+      ? `${block.strokeWidth}px ${rgbToHex(block.strokeColor || {r:0,g:0,b:0})}`
+      : 'none',
+  }}
+>
+  Preview: {block.translatedText || 'Sample text'}
+</div>
+```
+
+5. **Default Values**:
+- Automatically set stroke color to contrast with text color:
+  - If text is dark (luminance < 0.5): stroke = white
+  - If text is light (luminance >= 0.5): stroke = black
+- Default stroke width: 2px (readable but not overwhelming)
+
+**Files to Modify**:
+- `next/lib/state.ts` - Add strokeColor and strokeWidth fields
+- `next/components/render-customization.tsx` - Add UI controls
+- `next/components/render-panel.tsx` - Update exportImage() function
+- `next/components/canvas.tsx` - Update live render (optional, for preview)
+
+**Time Estimate**: 1-2 hours
+
+**Visual Example**:
+```
+Without stroke:     With stroke (2px black):
+ Hello World         ╔═╗ Hello World
+                     ║▓║ (white text with black outline)
+```
+
+---
+
 **Last Updated**: 2025-10-04
-**Next Review**: After Phase 1 completion
+**Next Review**: After Option 3 (NewLaMa) completion

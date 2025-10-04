@@ -1497,6 +1497,323 @@ interface InpaintedRegion {
   width: number
   height: number
 }
+🚀 OPTION 3: NEWLAMA - LOCALIZED INPAINTING WITH MASK-BASED COMPOSITING
+Executive Summary
+This is the CORRECT implementation of localized LaMa inpainting with proper mask-based alpha compositing. Unlike Option 2 (which naively draws rectangles), Option 3 uses the segmentation mask to composite ONLY the text pixels, preserving surrounding detail like character lineart, screentones, and backgrounds.
+
+Critical Differences from Option 2
+Aspect	Option 2 (Current/Broken)	Option 3 (NewLaMa/Correct)
+Compositing	ctx.drawImage(crop, x, y) - Replaces entire rectangular region	Alpha-blended using segmentation mask - Only replaces text pixels
+Visual Result	"Scorched earth" - Rectangle overlay, same as Option 1	Seamless - Preserves lineart, gradients, screentones
+GPU Usage	May fall back to iGPU (DirectML)	Explicit CUDA with user control
+Layering	[Original] → [Inpainted Rectangle] → [Text]	[Original] → [Masked Inpaint] → [Text]
+Quality	Low - visible rectangle boundaries	High - pixel-perfect text removal
+
+Pipeline Architecture
+Phase 1: Backend (Rust) - Per-Block Inpainting
+Command: inpaint_region (already implemented, reused from Option 2)
+
+Input:
+  - Full original image (PNG bytes)
+  - Full 1024×1024 segmentation mask (PNG bytes)
+  - BBox coordinates (original image space)
+  - Padding (default 25px for context)
+
+Process:
+  1. Add padding to bbox in original space
+  2. Crop image region at original resolution
+  3. Map bbox to mask coordinates (1024×1024 space)
+  4. Crop and resize mask to match image crop dimensions
+  5. Run LaMa inference on cropped image + mask
+  6. Return PNG-encoded inpainted crop + position
+
+Output:
+  {
+    image: Vec<u8>,    // PNG bytes of inpainted crop
+    x: f32,            // Position in original image
+    y: f32,
+    width: u32,        // Crop dimensions
+    height: u32
+  }
+
+Phase 2: Frontend (TypeScript) - Mask-Based Alpha Compositing
+Key Innovation: Use segmentation mask as alpha channel for pixel-perfect blending
+
+Step-by-Step Process:
+
+1. Prepare Full-Resolution Canvas
+const canvas = new OffscreenCanvas(originalWidth, originalHeight)
+const ctx = canvas.getContext('2d')!
+ctx.drawImage(originalImage, 0, 0)  // Base layer
+
+2. For Each Text Block (Sequential Processing):
+for (const block of textBlocks) {
+  // A. Call backend for localized inpainting
+  const result = await invoke('inpaint_region', {
+    image: fullImageBuffer,
+    mask: fullMaskBuffer,
+    bbox: block,
+    padding: 25
+  })
+
+  // B. Convert result to ImageBitmap
+  const inpaintedCrop = await createImageBitmap(
+    new Blob([new Uint8Array(result.image)])
+  )
+
+  // C. *** CRITICAL: Alpha-blended compositing ***
+  await compositeMaskedRegion(
+    ctx,                    // Target canvas context
+    inpaintedCrop,          // LaMa-inpainted crop
+    result.x,               // Position
+    result.y,
+    result.width,
+    result.height,
+    block,                  // Text block metadata
+    segmentationMask,       // Full 1024×1024 mask
+    originalWidth,
+    originalHeight,
+    featherRadius: 5        // Edge smoothing
+  )
+}
+
+3. Export Final Composite
+const blob = await canvas.convertToBlob({ type: 'image/png' })
+const finalImage = await createImageFromBuffer(await blob.arrayBuffer())
+setInpaintedImage(finalImage)
+
+Phase 3: Alpha Compositing Algorithm
+File: next/utils/alpha-compositing.ts
+
+Core Function: compositeMaskedRegion()
+
+export async function compositeMaskedRegion(
+  baseCtx: OffscreenCanvasRenderingContext2D,
+  inpaintedCrop: ImageBitmap,
+  cropX: number,
+  cropY: number,
+  cropWidth: number,
+  cropHeight: number,
+  textBlock: TextBlock,
+  fullMask: number[],      // 1024×1024 grayscale array
+  origWidth: number,
+  origHeight: number,
+  featherRadius: number = 5
+) {
+
+  // Step 1: Extract mask region for this text block
+  const maskRegion = extractMaskRegion(
+    fullMask,
+    textBlock,
+    origWidth,
+    origHeight,
+    cropWidth,
+    cropHeight
+  )
+
+  // Step 2: Create alpha channel with feathering
+  const alphaChannel = createFeatheredAlpha(
+    maskRegion,
+    cropWidth,
+    cropHeight,
+    featherRadius
+  )
+
+  // Step 3: Create temporary canvas for masked inpainted crop
+  const tempCanvas = new OffscreenCanvas(cropWidth, cropHeight)
+  const tempCtx = tempCanvas.getContext('2d')!
+
+  // Draw inpainted crop
+  tempCtx.drawImage(inpaintedCrop, 0, 0)
+
+  // Apply alpha mask using destination-in
+  const alphaImageData = new ImageData(
+    new Uint8ClampedArray(alphaChannel),
+    cropWidth,
+    cropHeight
+  )
+  tempCtx.globalCompositeOperation = 'destination-in'
+  tempCtx.putImageData(alphaImageData, 0, 0)
+
+  // Step 4: Composite onto base canvas
+  baseCtx.drawImage(tempCanvas, cropX, cropY)
+}
+
+Mask Extraction Logic
+function extractMaskRegion(
+  fullMask: number[],       // 1024×1024 flat array
+  textBlock: TextBlock,
+  origWidth: number,
+  origHeight: number,
+  targetWidth: number,
+  targetHeight: number
+): Uint8Array {
+
+  const scaleX = 1024 / origWidth
+  const scaleY = 1024 / origHeight
+
+  // Map text block to mask coordinates
+  const maskXmin = Math.floor(textBlock.xmin * scaleX)
+  const maskYmin = Math.floor(textBlock.ymin * scaleY)
+
+  // Extract and resize mask region to match crop dimensions
+  const maskRegion = new Uint8Array(targetWidth * targetHeight)
+
+  for (let y = 0; y < targetHeight; y++) {
+    for (let x = 0; x < targetWidth; x++) {
+      // Map crop pixel back to mask space
+      const maskX = Math.floor(maskXmin + (x / targetWidth) * (textBlock.xmax - textBlock.xmin) * scaleX)
+      const maskY = Math.floor(maskYmin + (y / targetHeight) * (textBlock.ymax - textBlock.ymin) * scaleY)
+
+      // Clamp to mask bounds
+      const clampedX = Math.min(Math.max(maskX, 0), 1023)
+      const clampedY = Math.min(Math.max(maskY, 0), 1023)
+
+      const maskIdx = clampedY * 1024 + clampedX
+      maskRegion[y * targetWidth + x] = fullMask[maskIdx] || 0
+    }
+  }
+
+  return maskRegion
+}
+
+Feathering Algorithm
+function createFeatheredAlpha(
+  maskRegion: Uint8Array,
+  width: number,
+  height: number,
+  featherRadius: number
+): Uint8Array {
+
+  // RGBA format (4 bytes per pixel)
+  const alpha = new Uint8Array(width * height * 4)
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const maskValue = maskRegion[y * width + x]
+
+      // Skip if not text (mask value < 30)
+      if (maskValue < 30) {
+        const idx = (y * width + x) * 4
+        alpha[idx] = 0     // R
+        alpha[idx + 1] = 0 // G
+        alpha[idx + 2] = 0 // B
+        alpha[idx + 3] = 0 // A - fully transparent
+        continue
+      }
+
+      // Calculate distance to nearest edge
+      const distToLeft = x
+      const distToRight = width - x - 1
+      const distToTop = y
+      const distToBottom = height - y - 1
+      const distToEdge = Math.min(distToLeft, distToRight, distToTop, distToBottom)
+
+      // Apply feathering
+      let alphaValue = maskValue
+      if (distToEdge < featherRadius) {
+        // Smooth falloff using cosine easing
+        const edgeFactor = distToEdge / featherRadius
+        const smoothFactor = 0.5 - 0.5 * Math.cos(edgeFactor * Math.PI)
+        alphaValue = Math.floor(maskValue * smoothFactor)
+      }
+
+      const idx = (y * width + x) * 4
+      alpha[idx] = 255           // R (white for visibility)
+      alpha[idx + 1] = 255       // G
+      alpha[idx + 2] = 255       // B
+      alpha[idx + 3] = alphaValue // A - actual alpha channel
+    }
+  }
+
+  return alpha
+}
+
+Visual Example: Why This Works
+Scenario: Anime character with speech bubble text overlay
+
+Original Image:
+┌─────────────────────────┐
+│  Character lineart      │
+│    ╱╲                   │
+│   ╱  ╲  ┌────────┐      │
+│  │ ^^ │ │こんに  │      │ <- Text overlays lineart
+│   ╲__╱  │ちは    │      │
+│         └────────┘      │
+└─────────────────────────┘
+
+Segmentation Mask (1024×1024):
+┌─────────────────────────┐
+│  ░░░░░░░░░░░░░░░░░░░░░  │ <- Black = preserve
+│    ░░                   │
+│   ░░░░  ┌────────┐      │
+│  ░ ░░ ░ │████████│      │ <- White = text to remove
+│   ░░░░  │████████│      │
+│         └────────┘      │
+└─────────────────────────┘
+
+Option 2 Result (Broken):
+┌─────────────────────────┐
+│  Character lineart      │
+│    ╱╲                   │
+│   ╱  ╲  ┌────────┐      │
+│  │ ^^ │ │        │      │ <- RECTANGLE destroys lineart!
+│   ╲__╱  │        │      │
+│         └────────┘      │
+└─────────────────────────┘
+
+Option 3 Result (Correct):
+┌─────────────────────────┐
+│  Character lineart      │
+│    ╱╲                   │
+│   ╱  ╲  ┌────────┐      │
+│  │ ^^ │ │░░░░░░░░│      │ <- ONLY text removed, lineart preserved!
+│   ╲__╱  │░░░░░░░░│      │    (░ = inpainted background)
+│         └────────┘      │
+└─────────────────────────┘
+
+Implementation Checklist
+Backend (Reuse Existing):
+  ✅ inpaint_region command (already implemented)
+  ✅ Coordinate mapping (already implemented)
+  ✅ Mask extraction and resizing (already implemented)
+
+Frontend (New Implementation):
+  □ Create next/utils/alpha-compositing.ts
+    □ compositeMaskedRegion()
+    □ extractMaskRegion()
+    □ createFeatheredAlpha()
+
+  □ Update next/components/inpaint-panel.tsx
+    □ Add runNewLamaInpainting() function
+    □ Route based on renderMethod === 'newlama'
+    □ Call compositeMaskedRegion() for each block
+
+  □ Update next/lib/state.ts
+    □ Change renderMethod type to 'rectangle' | 'lama' | 'newlama'
+
+  □ Update next/components/render-panel.tsx
+    □ Add "NewLaMa (Mask-Based)" option to dropdown
+    □ Update description text
+
+Performance Considerations
+- Sequential processing: ~5-10 seconds per text block (same as Option 2)
+- Mask extraction: Negligible overhead (~10ms per block)
+- Feathering: Minimal overhead (~20ms per block)
+- Total time: Primarily backend LaMa inference (GPU-bound)
+
+Quality Parameters
+- featherRadius: 5px (default) - Smooth transitions at edges
+- maskThreshold: 30 (from detection) - Text vs background separation
+- Padding: 25px (default) - Context for LaMa inference
+
+Expected Visual Quality
+✅ Seamless integration - No visible rectangle boundaries
+✅ Preserved detail - Character lineart, screentones intact
+✅ Clean text removal - Only text pixels replaced
+✅ Smooth edges - Feathering prevents hard lines
+✅ Context-aware - LaMa sees surrounding pixels for better inpainting
+
 ⚙️ PERFORMANCE & OPTIMIZATION
 Batch Processing with Progress
 // Option: Process multiple regions in parallel (if GPU supports it)
