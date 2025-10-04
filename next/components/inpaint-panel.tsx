@@ -1,74 +1,126 @@
 'use client'
 
 import { useState } from 'react'
-import { Play, AlertCircle, CheckCircle } from 'lucide-react'
-import { Button, Text, Callout } from '@radix-ui/themes'
+import { Play, AlertCircle, CheckCircle, X } from 'lucide-react'
+import { Button, Text, Callout, Progress } from '@radix-ui/themes'
 import { invoke } from '@tauri-apps/api/core'
 import { useEditorStore } from '@/lib/state'
 import { imageBitmapToArrayBuffer, maskToArrayBuffer } from '@/utils/image'
 import { createImageFromBuffer } from '@/lib/image'
 
+interface InpaintedRegion {
+  image: number[]
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export default function InpaintPanel() {
-  const { image, segmentationMask, textBlocks, setInpaintedImage } = useEditorStore()
+  const { image, segmentationMask, textBlocks, setInpaintedImage, renderMethod } = useEditorStore()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [currentBlock, setCurrentBlock] = useState(0)
+  const [cancelled, setCancelled] = useState(false)
 
   const runInpaint = async () => {
-    // Validation
-    if (!image) {
-      setError('No image loaded. Please load a manga image first.')
+    if (!image || !segmentationMask || textBlocks.length === 0) {
+      setError('Missing requirements. Run Detection first.')
       return
     }
 
-    if (!segmentationMask) {
-      setError('No segmentation mask available. Run Detection first.')
-      return
+    if (renderMethod === 'lama') {
+      await runLocalizedInpainting()
+    } else {
+      await runFullInpainting()
     }
+  }
 
-    if (textBlocks.length === 0) {
-      setError('No text blocks detected. Run Detection first.')
-      return
-    }
-
+  const runFullInpainting = async () => {
     setLoading(true)
     setError(null)
     setSuccess(false)
 
     try {
-      console.log('Starting inpainting...')
-      console.log('Image dimensions:', image.bitmap.width, 'x', image.bitmap.height)
-      console.log('Mask size:', segmentationMask.length, 'bytes')
+      const imageBuffer = await imageBitmapToArrayBuffer(image!.bitmap)
+      const maskBuffer = await maskToArrayBuffer(segmentationMask!)
 
-      // Convert image to ArrayBuffer (PNG format)
-      const imageBuffer = await imageBitmapToArrayBuffer(image.bitmap)
-      console.log('Image buffer size:', imageBuffer.byteLength, 'bytes')
-
-      // Convert mask to ArrayBuffer (PNG format)
-      const maskBuffer = await maskToArrayBuffer(segmentationMask)
-      console.log('Mask buffer size:', maskBuffer.byteLength, 'bytes')
-
-      // Call backend inpaint command
-      console.log('Calling inpaint backend...')
       const result = await invoke<number[]>('inpaint', {
         image: Array.from(new Uint8Array(imageBuffer)),
         mask: Array.from(new Uint8Array(maskBuffer)),
       })
 
-      console.log('Inpainting complete! Result size:', result.length, 'bytes')
-
-      // Convert result back to Image
       const resultBuffer = new Uint8Array(result).buffer
       const inpainted = await createImageFromBuffer(resultBuffer)
-
       setInpaintedImage(inpainted)
       setSuccess(true)
-      console.log('Inpainted image stored in state')
     } catch (err) {
-      console.error('Inpainting error:', err)
       setError(err instanceof Error ? err.message : 'Inpainting failed')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const runLocalizedInpainting = async () => {
+    setLoading(true)
+    setError(null)
+    setSuccess(false)
+    setProgress(0)
+    setCancelled(false)
+
+    try {
+      const imageBuffer = await imageBitmapToArrayBuffer(image!.bitmap)
+      const maskBuffer = await maskToArrayBuffer(segmentationMask!)
+
+      // Create canvas at original resolution
+      const canvas = new OffscreenCanvas(image!.bitmap.width, image!.bitmap.height)
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(image!.bitmap, 0, 0)
+
+      // Process each text block
+      for (let i = 0; i < textBlocks.length; i++) {
+        if (cancelled) break
+
+        setCurrentBlock(i + 1)
+        const block = textBlocks[i]
+
+        const blockWidth = block.xmax - block.xmin
+        const blockHeight = block.ymax - block.ymin
+        if (blockWidth < 20 || blockHeight < 20) continue
+
+        const result = await invoke<InpaintedRegion>('inpaint_region', {
+          image: Array.from(new Uint8Array(imageBuffer)),
+          mask: Array.from(new Uint8Array(maskBuffer)),
+          bbox: {
+            xmin: block.xmin,
+            ymin: block.ymin,
+            xmax: block.xmax,
+            ymax: block.ymax,
+          },
+          padding: 25,
+        })
+
+        const blob = new Blob([new Uint8Array(result.image)])
+        const bitmap = await createImageBitmap(blob)
+
+        // Simple composite (feathering implemented later)
+        ctx.drawImage(bitmap, result.x, result.y)
+
+        setProgress((i + 1) / textBlocks.length)
+      }
+
+      const finalBlob = await canvas.convertToBlob({ type: 'image/png' })
+      const finalBuffer = await finalBlob.arrayBuffer()
+      const finalImage = await createImageFromBuffer(finalBuffer)
+      setInpaintedImage(finalImage)
+      setSuccess(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Localized inpainting failed')
+    } finally {
+      setLoading(false)
+      setCurrentBlock(0)
     }
   }
 
@@ -139,8 +191,22 @@ export default function InpaintPanel() {
           </Callout.Root>
         )}
 
-        {/* Loading info */}
-        {loading && (
+        {/* Progress for localized inpainting */}
+        {loading && renderMethod === 'lama' && (
+          <div className='space-y-2'>
+            <Progress value={progress * 100} />
+            <p className='text-sm text-gray-600'>
+              Processing block {currentBlock} of {textBlocks.length}...
+            </p>
+            <Button size='1' color='red' variant='soft' onClick={() => setCancelled(true)}>
+              <X className='h-4 w-4' />
+              Cancel
+            </Button>
+          </div>
+        )}
+
+        {/* Loading info for full inpainting */}
+        {loading && renderMethod !== 'lama' && (
           <div className='text-sm text-gray-600'>
             <p>Processing with LaMa AI model...</p>
             <p className='text-xs'>This may take 5-15 seconds depending on image size.</p>
@@ -151,13 +217,12 @@ export default function InpaintPanel() {
         {!segmentationMask && (
           <Callout.Root size='1'>
             <Callout.Text>
-              <strong>To use inpainting:</strong>
-              <ol className='ml-4 mt-1 list-decimal text-xs'>
-                <li>Run Detection to find text regions</li>
-                <li>Click "Run Inpainting" above</li>
-                <li>Wait for processing (5-15 seconds)</li>
-                <li>View cleaned image by clicking Inpaint tool</li>
-              </ol>
+              <strong>How it works:</strong>
+              <ul className='ml-4 mt-1 list-disc text-xs'>
+                <li><strong>Rectangle mode:</strong> Instant, uses full image inpainting</li>
+                <li><strong>LaMa mode:</strong> Processes each text region individually (~5-10s per block)</li>
+                <li>Switch modes in Render panel</li>
+              </ul>
             </Callout.Text>
           </Callout.Root>
         )}

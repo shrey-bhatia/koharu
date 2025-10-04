@@ -10,7 +10,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tokio::sync::Mutex;
 
 use crate::{
-    commands::{detection, inpaint, ocr, get_system_fonts},
+    commands::{detection, inpaint, ocr, get_system_fonts, inpaint_region},
     state::AppState,
 };
 
@@ -68,7 +68,7 @@ pub fn run() -> anyhow::Result<()> {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![detection, ocr, inpaint, get_system_fonts])
+        .invoke_handler(tauri::generate_handler![detection, ocr, inpaint, get_system_fonts, inpaint_region])
         .run(tauri::generate_context!())?;
 
     Ok(())
