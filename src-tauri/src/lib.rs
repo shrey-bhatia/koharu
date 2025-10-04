@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use std::fs;
 
 use crate::{
-    commands::{detection, inpaint, ocr, get_system_fonts, inpaint_region, set_gpu_preference, get_gpu_devices, get_current_gpu_status},
+    commands::{detection, ocr, get_system_fonts, inpaint_region, set_gpu_preference, get_gpu_devices, get_current_gpu_status},
     state::{AppState, GpuInitResult},
 };
 
@@ -185,7 +185,7 @@ pub fn run() -> anyhow::Result<()> {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![detection, ocr, inpaint, get_system_fonts, inpaint_region, set_gpu_preference, get_gpu_devices, get_current_gpu_status])
+        .invoke_handler(tauri::generate_handler![detection, ocr, get_system_fonts, inpaint_region, set_gpu_preference, get_gpu_devices, get_current_gpu_status])
         .run(tauri::generate_context!())?;
 
     Ok(())
