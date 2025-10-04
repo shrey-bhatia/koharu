@@ -31,10 +31,10 @@ export interface InpaintingConfig {
 
 export const INPAINTING_PRESETS: Record<'fast' | 'balanced' | 'quality', InpaintingConfig> = {
   fast: {
-    padding: 30,
-    targetSize: 384,
+    padding: 0,
+    targetSize: 512,  // NOTE: LaMa model only supports 512px, this is kept for API compat
     maskThreshold: 30,
-    maskErosion: 2,
+    maskErosion: 1,
     maskDilation: 0,
     featherRadius: 3,
     blendingMethod: 'alpha',
@@ -44,10 +44,10 @@ export const INPAINTING_PRESETS: Record<'fast' | 'balanced' | 'quality', Inpaint
     exportTriptychs: false,
   },
   balanced: {
-    padding: 50,
-    targetSize: 512,
+    padding: 0,
+    targetSize: 512,  // NOTE: LaMa model only supports 512px
     maskThreshold: 30,
-    maskErosion: 3,
+    maskErosion: 2,
     maskDilation: 0,
     featherRadius: 5,
     blendingMethod: 'auto',
@@ -57,10 +57,10 @@ export const INPAINTING_PRESETS: Record<'fast' | 'balanced' | 'quality', Inpaint
     exportTriptychs: false,
   },
   quality: {
-    padding: 80,
-    targetSize: 768,
+    padding: 0,
+    targetSize: 512,  // NOTE: LaMa model only supports 512px
     maskThreshold: 30,
-    maskErosion: 4,
+    maskErosion: 3,
     maskDilation: 1,
     featherRadius: 7,
     blendingMethod: 'seamless',

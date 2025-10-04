@@ -286,8 +286,7 @@ export default function InpaintPanel() {
         {/* Config Info */}
         <div className='text-xs text-gray-600 dark:text-gray-400'>
           <p>
-            Using <strong>{inpaintingConfig.targetSize}px</strong> resolution,{' '}
-            <strong>{inpaintingConfig.padding}px</strong> padding,{' '}
+            Using <strong>{inpaintingConfig.padding}px</strong> padding,{' '}
             <strong>{inpaintingConfig.maskErosion}px</strong> erosion
           </p>
         </div>

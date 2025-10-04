@@ -107,14 +107,19 @@ impl Lama {
         &mut self,
         image: &DynamicImage,
         mask: &DynamicImage,
-        target_size: u32,
+        _target_size: u32,  // IGNORED: LaMa model is hardcoded to 512x512
     ) -> anyhow::Result<DynamicImage> {
+        // NOTE: The LaMa ONNX model only accepts 512x512 input tensors.
+        // The target_size parameter is kept for API compatibility but ignored.
+        // All inference happens at 512x512 resolution.
+        let model_size = 512u32;
+
         let (orig_width, orig_height) = image.dimensions();
         let (image, resize_info) =
-            resize_with_padding(&image, target_size, image::imageops::FilterType::CatmullRom);
-        let (mask, _) = resize_with_padding(&mask, target_size, image::imageops::FilterType::CatmullRom);
+            resize_with_padding(&image, model_size, image::imageops::FilterType::CatmullRom);
+        let (mask, _) = resize_with_padding(&mask, model_size, image::imageops::FilterType::CatmullRom);
 
-        let size = target_size as usize;
+        let size = model_size as usize;
         let mut image_data = ndarray::Array::zeros((1, 3, size, size));
         for pixel in image.pixels() {
             let (x, y, pixel) = pixel;
@@ -147,9 +152,9 @@ impl Lama {
         let output = outputs["output"].try_extract_array::<f32>()?;
         let output = output.view();
 
-        let mut output_image = image::RgbImage::new(target_size, target_size);
-        for y in 0..target_size {
-            for x in 0..target_size {
+        let mut output_image = image::RgbImage::new(model_size, model_size);
+        for y in 0..model_size {
+            for x in 0..model_size {
                 let r = (output[[0, 0, y as usize, x as usize]] * 255.0).clamp(0.0, 255.0).round() as u8;
                 let g = (output[[0, 1, y as usize, x as usize]] * 255.0).clamp(0.0, 255.0).round() as u8;
                 let b = (output[[0, 2, y as usize, x as usize]] * 255.0).clamp(0.0, 255.0).round() as u8;

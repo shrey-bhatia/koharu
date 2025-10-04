@@ -90,33 +90,14 @@ export default function InpaintSettings() {
             <Slider
               value={[inpaintingConfig.padding]}
               onValueChange={([v]) => setInpaintingConfig({ padding: v })}
-              min={15}
+              min={0}
               max={100}
-              step={5}
+              step={1}
             />
-            <Text size='1' color='gray'>More context = better quality, slower inference</Text>
+            <Text size='1' color='gray'>Extra context around text. 0px = tight crop, higher = more context.</Text>
           </div>
 
-          {/* Target Resolution */}
-          <div className='space-y-2'>
-            <label className='text-xs font-medium text-gray-600 dark:text-gray-400'>
-              Inference Resolution
-            </label>
-            <Select.Root
-              value={String(inpaintingConfig.targetSize)}
-              onValueChange={(v) => setInpaintingConfig({ targetSize: parseInt(v) })}
-            >
-              <Select.Trigger className='w-full' />
-              <Select.Content>
-                <Select.Item value='256'>256px (Ultra Fast, ~2-3s)</Select.Item>
-                <Select.Item value='384'>384px (Fast, ~3-5s)</Select.Item>
-                <Select.Item value='512'>512px (Balanced, ~5-8s)</Select.Item>
-                <Select.Item value='768'>768px (Quality, ~12-15s)</Select.Item>
-                <Select.Item value='1024'>1024px (Max Quality, ~20-25s)</Select.Item>
-              </Select.Content>
-            </Select.Root>
-            <Text size='1' color='gray'>Higher = preserves lineart & screentones</Text>
-          </div>
+          {/* Note: Target Resolution removed - LaMa model only supports 512px */}
 
           {/* Mask Erosion */}
           <div className='space-y-2'>
