@@ -45,9 +45,15 @@ const loadTheme = (): 'light' | 'dark' => {
 }
 
 // Load rendering method preference
-const loadRenderMethod = (): 'rectangle' | 'lama' => {
+const loadRenderMethod = (): 'rectangle' | 'lama' | 'newlama' => {
   if (typeof window === 'undefined') return 'rectangle'
-  return (localStorage.getItem('render_method') as 'rectangle' | 'lama') || 'rectangle'
+  return (localStorage.getItem('render_method') as 'rectangle' | 'lama' | 'newlama') || 'rectangle'
+}
+
+// Load GPU preference
+const loadGpuPreference = (): 'cuda' | 'directml' | 'cpu' => {
+  if (typeof window === 'undefined') return 'cuda'
+  return (localStorage.getItem('gpu_preference') as 'cuda' | 'directml' | 'cpu') || 'cuda'
 }
 
 export const useEditorStore = create(
@@ -63,6 +69,14 @@ export const useEditorStore = create(
       theme: loadTheme(),
       renderMethod: loadRenderMethod(),
       selectedBlockIndex: null,
+      gpuPreference: loadGpuPreference(),
+      currentStage: 'original',
+      pipelineStages: {
+        original: null,
+        textless: null,
+        withRectangles: null,
+        final: null,
+      },
     } as {
       image: Image | null
       tool: string
@@ -74,6 +88,14 @@ export const useEditorStore = create(
       theme: 'light' | 'dark'
       renderMethod: 'rectangle' | 'lama' | 'newlama'
       selectedBlockIndex: number | null
+      gpuPreference: 'cuda' | 'directml' | 'cpu'
+      currentStage: 'original' | 'textless' | 'rectangles' | 'final'
+      pipelineStages: {
+        original: Image | null
+        textless: Image | null
+        withRectangles: Image | null
+        final: Image | null
+      }
     },
     (set) => ({
       setImage: (image: Image | null) => set({ image }),
@@ -106,6 +128,17 @@ export const useEditorStore = create(
         set({ renderMethod: method })
       },
       setSelectedBlockIndex: (index: number | null) => set({ selectedBlockIndex: index }),
+      setGpuPreference: (pref: 'cuda' | 'directml' | 'cpu') => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('gpu_preference', pref)
+        }
+        set({ gpuPreference: pref })
+      },
+      setCurrentStage: (stage: 'original' | 'textless' | 'rectangles' | 'final') => set({ currentStage: stage }),
+      setPipelineStage: (stage: 'original' | 'textless' | 'withRectangles' | 'final', image: Image | null) =>
+        set((state) => ({
+          pipelineStages: { ...state.pipelineStages, [stage]: image },
+        })),
     })
   )
 )

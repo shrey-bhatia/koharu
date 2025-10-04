@@ -18,7 +18,7 @@ interface InpaintedRegion {
 }
 
 export default function InpaintPanel() {
-  const { image, segmentationMask, textBlocks, setInpaintedImage, renderMethod } = useEditorStore()
+  const { image, segmentationMask, textBlocks, setInpaintedImage, renderMethod, setPipelineStage, setCurrentStage } = useEditorStore()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -58,6 +58,8 @@ export default function InpaintPanel() {
       const resultBuffer = new Uint8Array(result).buffer
       const inpainted = await createImageFromBuffer(resultBuffer)
       setInpaintedImage(inpainted)
+      setPipelineStage('textless', inpainted)
+      setCurrentStage('textless')
       setSuccess(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Inpainting failed')
@@ -118,6 +120,8 @@ export default function InpaintPanel() {
       const finalBuffer = await finalBlob.arrayBuffer()
       const finalImage = await createImageFromBuffer(finalBuffer)
       setInpaintedImage(finalImage)
+      setPipelineStage('textless', finalImage)
+      setCurrentStage('textless')
       setSuccess(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Localized inpainting failed')
@@ -191,6 +195,8 @@ export default function InpaintPanel() {
       const finalBuffer = await finalBlob.arrayBuffer()
       const finalImage = await createImageFromBuffer(finalBuffer)
       setInpaintedImage(finalImage)
+      setPipelineStage('textless', finalImage)
+      setCurrentStage('textless')
       setSuccess(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'NewLaMa inpainting failed')

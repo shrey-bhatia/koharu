@@ -7,10 +7,11 @@ import { useEditorStore } from '@/lib/state'
 import { extractBackgroundColor } from '@/utils/color-extraction'
 import { ensureReadableContrast } from '@/utils/wcag-contrast'
 import { calculateOptimalFontSize } from '@/utils/font-sizing'
+import { createImageFromBuffer } from '@/lib/image'
 import RenderCustomization from './render-customization'
 
 export default function RenderPanel() {
-  const { image, textBlocks, setTextBlocks, renderMethod, setRenderMethod } = useEditorStore()
+  const { image, textBlocks, setTextBlocks, renderMethod, setRenderMethod, inpaintedImage, setPipelineStage, setCurrentStage } = useEditorStore()
   const [processing, setProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -27,12 +28,23 @@ export default function RenderPanel() {
       return
     }
 
+    // Check if we need inpainted base for LaMa/NewLaMa modes
+    if ((renderMethod === 'lama' || renderMethod === 'newlama') && !inpaintedImage) {
+      setError('Please run Inpainting first for LaMa/NewLaMa mode')
+      return
+    }
+
     setProcessing(true)
     setError(null)
     setProgress(0)
 
     try {
       const updated = []
+
+      // Determine base image based on render method
+      const baseImage = (renderMethod === 'lama' || renderMethod === 'newlama') && inpaintedImage
+        ? inpaintedImage.bitmap
+        : image.bitmap
 
       for (let i = 0; i < textBlocks.length; i++) {
         const block = textBlocks[i]
@@ -46,8 +58,8 @@ export default function RenderPanel() {
 
         console.log(`Processing block ${i + 1}/${textBlocks.length}...`)
 
-        // Extract background color from border
-        const colors = await extractBackgroundColor(image.bitmap, block, 10)
+        // Extract background color from border (using appropriate base)
+        const colors = await extractBackgroundColor(baseImage, block, 10)
 
         // Ensure readable contrast
         const readable = ensureReadableContrast(
@@ -99,8 +111,13 @@ export default function RenderPanel() {
       const ctx = canvas.getContext('2d')
       if (!ctx) throw new Error('Failed to get canvas context')
 
-      // 1. Draw original image
-      ctx.drawImage(image.bitmap, 0, 0)
+      // Determine base image based on render method
+      const baseImage = (renderMethod === 'lama' || renderMethod === 'newlama') && inpaintedImage
+        ? inpaintedImage.bitmap
+        : image.bitmap
+
+      // 1. Draw base image (original or textless)
+      ctx.drawImage(baseImage, 0, 0)
 
       // 2. Draw rounded rectangles
       for (const block of textBlocks) {
@@ -118,6 +135,12 @@ export default function RenderPanel() {
         ctx.roundRect(x, y, width, height, radius)
         ctx.fill()
       }
+
+      // Save 'withRectangles' stage (base + backgrounds, no text yet)
+      const rectanglesBlob = await canvas.convertToBlob({ type: 'image/png' })
+      const rectanglesBuffer = await rectanglesBlob.arrayBuffer()
+      const rectanglesStage = await createImageFromBuffer(rectanglesBuffer)
+      setPipelineStage('withRectangles', rectanglesStage)
 
       // 3. Draw translated text with advanced typography support and proper wrapping
       for (const block of textBlocks) {
@@ -172,9 +195,14 @@ export default function RenderPanel() {
         })
       }
 
-      // 4. Export as PNG
-      const blob = await canvas.convertToBlob({ type: 'image/png', quality: 1.0 })
-      const url = URL.createObjectURL(blob)
+      // 4. Save final stage and export as PNG
+      const finalBlob = await canvas.convertToBlob({ type: 'image/png', quality: 1.0 })
+      const finalBuffer = await finalBlob.arrayBuffer()
+      const finalStage = await createImageFromBuffer(finalBuffer)
+      setPipelineStage('final', finalStage)
+      setCurrentStage('final')
+
+      const url = URL.createObjectURL(finalBlob)
 
       // 5. Trigger download
       const a = document.createElement('a')

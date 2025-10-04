@@ -1,18 +1,19 @@
 'use client'
 
 import { useState } from 'react'
-import { Dialog, Button, TextField, Text, Callout } from '@radix-ui/themes'
+import { Dialog, Button, TextField, Text, Callout, Select } from '@radix-ui/themes'
 import { Settings, CheckCircle, XCircle } from 'lucide-react'
 import { useEditorStore } from '@/lib/state'
 import { testApiKey } from '@/utils/translation'
 
 export default function SettingsDialog() {
-  const { translationApiKey, setTranslationApiKey } = useEditorStore()
+  const { translationApiKey, setTranslationApiKey, gpuPreference, setGpuPreference } = useEditorStore()
   const [open, setOpen] = useState(false)
   const [apiKeyInput, setApiKeyInput] = useState(translationApiKey || '')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null)
   const [testMessage, setTestMessage] = useState('')
+  const [gpuChanged, setGpuChanged] = useState(false)
 
   const handleTest = async () => {
     if (!apiKeyInput || apiKeyInput.trim().length === 0) {
@@ -144,6 +145,53 @@ export default function SettingsDialog() {
               </div>
             </Text>
           </div>
+
+          {/* GPU Preference */}
+          <div className='space-y-2'>
+            <label>
+              <Text as='div' size='2' mb='1' weight='bold'>
+                GPU Preference
+              </Text>
+              <Select.Root
+                value={gpuPreference}
+                onValueChange={(value: 'cuda' | 'directml' | 'cpu') => {
+                  setGpuPreference(value)
+                  setGpuChanged(true)
+                }}
+              >
+                <Select.Trigger className='w-full' />
+                <Select.Content>
+                  <Select.Item value='cuda'>
+                    <div className='flex flex-col'>
+                      <span className='font-medium'>NVIDIA CUDA (Best Performance)</span>
+                      <span className='text-xs text-gray-500'>Requires NVIDIA GPU with CUDA support</span>
+                    </div>
+                  </Select.Item>
+                  <Select.Item value='directml'>
+                    <div className='flex flex-col'>
+                      <span className='font-medium'>DirectML (Intel/AMD GPU)</span>
+                      <span className='text-xs text-gray-500'>Uses integrated or AMD graphics</span>
+                    </div>
+                  </Select.Item>
+                  <Select.Item value='cpu'>
+                    <div className='flex flex-col'>
+                      <span className='font-medium'>CPU Only (Slowest)</span>
+                      <span className='text-xs text-gray-500'>Fallback option, very slow</span>
+                    </div>
+                  </Select.Item>
+                </Select.Content>
+              </Select.Root>
+            </label>
+          </div>
+
+          {/* GPU change warning */}
+          {gpuChanged && (
+            <Callout.Root color='yellow' size='1'>
+              <Callout.Text>
+                <strong>Restart Required:</strong> GPU preference will apply after restarting the application.
+              </Callout.Text>
+            </Callout.Root>
+          )}
 
           {/* Security notice */}
           <Callout.Root size='1'>

@@ -15,7 +15,7 @@ import ScaleControl from './scale-control'
 import { useEditorStore } from '@/lib/state'
 
 function Canvas() {
-  const { tool, scale, image, textBlocks, setTextBlocks, inpaintedImage, selectedBlockIndex, setSelectedBlockIndex } = useEditorStore()
+  const { tool, scale, image, textBlocks, setTextBlocks, inpaintedImage, selectedBlockIndex, setSelectedBlockIndex, currentStage, pipelineStages } = useEditorStore()
   const containerRef = useRef<HTMLDivElement>(null)
   const inpaintLayerRef = useRef<Konva.Layer>(null)
 
@@ -53,6 +53,28 @@ function Canvas() {
     setTextBlocks(updated)
   }
 
+  // Determine which base image to display based on currentStage
+  const getBaseImage = () => {
+    if (tool === 'inpaint' && inpaintedImage) {
+      return inpaintedImage.bitmap
+    }
+
+    switch (currentStage) {
+      case 'textless':
+        return pipelineStages.textless?.bitmap || image?.bitmap || null
+      case 'rectangles':
+        return pipelineStages.withRectangles?.bitmap || pipelineStages.textless?.bitmap || image?.bitmap || null
+      case 'final':
+        return pipelineStages.final?.bitmap || image?.bitmap || null
+      case 'original':
+      default:
+        return image?.bitmap || null
+    }
+  }
+
+  const baseImage = getBaseImage()
+  const shouldShowOverlays = tool === 'render' && (currentStage === 'rectangles' || currentStage === 'final')
+
   return (
     <>
       <div ref={containerRef} className='relative h-full w-full flex-1'>
@@ -67,13 +89,13 @@ function Canvas() {
                 setSelected(null)
               }}
             >
-              {/* Layer 1: Original image */}
+              {/* Layer 1: Base image (respects pipeline stage) */}
               <Layer>
-                <Image image={image?.bitmap ?? null} />
+                <Image image={baseImage} />
               </Layer>
 
-              {/* Layer 2: Rectangle fills (render mode) */}
-              {tool === 'render' && (
+              {/* Layer 2: Rectangle fills (render mode, only for 'rectangles' and 'final' stages) */}
+              {shouldShowOverlays && (
                 <Layer>
                   {textBlocks?.map((block, index) => {
                     if (!block.backgroundColor) return null
@@ -98,8 +120,8 @@ function Canvas() {
                 </Layer>
               )}
 
-              {/* Layer 3: Translated text (render mode) */}
-              {tool === 'render' && (
+              {/* Layer 3: Translated text (render mode, only for 'final' stage) */}
+              {tool === 'render' && currentStage === 'final' && (
                 <Layer>
                   {textBlocks?.map((block, index) => {
                     if (!block.translatedText || !block.fontSize || !block.textColor) return null
