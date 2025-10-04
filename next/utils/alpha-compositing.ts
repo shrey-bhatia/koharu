@@ -23,31 +23,21 @@ export async function compositeMaskedRegion(
     cropHeight
   )
 
-  // Step 2: Create alpha channel with feathering
-  const alphaChannel = createFeatheredAlpha(
+  // Step 2: Create feathered alpha-masked ImageData with inpainted pixels
+  const maskedImageData = createFeatheredAlpha(
+    inpaintedCrop,
     maskRegion,
     cropWidth,
     cropHeight,
     featherRadius
   )
 
-  // Step 3: Create temporary canvas for masked inpainted crop
+  // Step 3: Create temporary canvas to hold the masked inpaint
   const tempCanvas = new OffscreenCanvas(cropWidth, cropHeight)
   const tempCtx = tempCanvas.getContext('2d')!
+  tempCtx.putImageData(maskedImageData, 0, 0)
 
-  // Draw inpainted crop
-  tempCtx.drawImage(inpaintedCrop, 0, 0)
-
-  // Apply alpha mask using destination-in
-  const alphaImageData = new ImageData(
-    new Uint8ClampedArray(alphaChannel),
-    cropWidth,
-    cropHeight
-  )
-  tempCtx.globalCompositeOperation = 'destination-in'
-  tempCtx.putImageData(alphaImageData, 0, 0)
-
-  // Step 4: Composite onto base canvas
+  // Step 4: Composite onto base canvas with default 'source-over' blending
   baseCtx.drawImage(tempCanvas, cropX, cropY)
 }
 
@@ -88,36 +78,39 @@ function extractMaskRegion(
 }
 
 function createFeatheredAlpha(
+  inpaintedCrop: ImageBitmap,
   maskRegion: Uint8Array,
   width: number,
   height: number,
   featherRadius: number
-): Uint8Array {
-  // RGBA format (4 bytes per pixel)
-  const alpha = new Uint8Array(width * height * 4)
+): ImageData {
+  // Create a canvas to get the inpainted pixels
+  const tempCanvas = new OffscreenCanvas(width, height)
+  const tempCtx = tempCanvas.getContext('2d')!
+  tempCtx.drawImage(inpaintedCrop, 0, 0, width, height)
+  const inpaintedData = tempCtx.getImageData(0, 0, width, height)
+  const pixels = inpaintedData.data
 
+  // Apply feathered alpha to the inpainted pixels directly
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const maskValue = maskRegion[y * width + x]
+      const idx = (y * width + x) * 4
 
-      // Skip if not text (mask value < 30)
+      // Skip if not text (mask value < 30) - make fully transparent
       if (maskValue < 30) {
-        const idx = (y * width + x) * 4
-        alpha[idx] = 0     // R
-        alpha[idx + 1] = 0 // G
-        alpha[idx + 2] = 0 // B
-        alpha[idx + 3] = 0 // A - fully transparent
+        pixels[idx + 3] = 0 // A - fully transparent (preserve RGB from inpaint)
         continue
       }
 
-      // Calculate distance to nearest edge
+      // Calculate distance to nearest edge for feathering
       const distToLeft = x
       const distToRight = width - x - 1
       const distToTop = y
       const distToBottom = height - y - 1
       const distToEdge = Math.min(distToLeft, distToRight, distToTop, distToBottom)
 
-      // Apply feathering
+      // Apply feathering to alpha channel only
       let alphaValue = maskValue
       if (distToEdge < featherRadius) {
         // Smooth falloff using cosine easing
@@ -126,13 +119,10 @@ function createFeatheredAlpha(
         alphaValue = Math.floor(maskValue * smoothFactor)
       }
 
-      const idx = (y * width + x) * 4
-      alpha[idx] = 255           // R (white for visibility)
-      alpha[idx + 1] = 255       // G
-      alpha[idx + 2] = 255       // B
-      alpha[idx + 3] = alphaValue // A - actual alpha channel
+      // Keep RGB from inpainted crop, only modify alpha
+      pixels[idx + 3] = alphaValue
     }
   }
 
-  return alpha
+  return inpaintedData
 }
