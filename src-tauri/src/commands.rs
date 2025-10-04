@@ -134,11 +134,12 @@ pub async fn inpaint_region(
     };
     
     // Assert valid bbox
-    anyhow::ensure!(
-        padded_bbox.xmax > padded_bbox.xmin && padded_bbox.ymax > padded_bbox.ymin,
-        "Invalid padded bbox: [{},{} -> {},{}]",
-        padded_bbox.xmin, padded_bbox.ymin, padded_bbox.xmax, padded_bbox.ymax
-    );
+    if !(padded_bbox.xmax > padded_bbox.xmin && padded_bbox.ymax > padded_bbox.ymin) {
+        return Err(anyhow::anyhow!(
+            "Invalid padded bbox: [{},{} -> {},{}]",
+            padded_bbox.xmin, padded_bbox.ymin, padded_bbox.xmax, padded_bbox.ymax
+        ).into());
+    }
 
     // Crop image region
     let crop_width = (padded_bbox.xmax - padded_bbox.xmin) as u32;
@@ -246,11 +247,12 @@ fn extract_and_resize_mask(
         mask_crop_width, mask_crop_height
     );
     
-    anyhow::ensure!(
-        mask_crop_width > 0 && mask_crop_height > 0,
-        "Invalid mask crop dimensions: {}x{}",
-        mask_crop_width, mask_crop_height
-    );
+    if mask_crop_width == 0 || mask_crop_height == 0 {
+        return Err(anyhow::anyhow!(
+            "Invalid mask crop dimensions: {}x{}",
+            mask_crop_width, mask_crop_height
+        ));
+    }
 
     // Crop mask with bounds checking
     let mut cropped_mask = image::GrayImage::new(mask_crop_width, mask_crop_height);
@@ -310,7 +312,7 @@ fn save_debug_triptych(
     crop: &image::DynamicImage,
     mask: &image::GrayImage,
     bbox: &BBox,
-    padded_bbox: &BBox,
+    _padded_bbox: &BBox,
 ) -> anyhow::Result<()> {
     let debug_dir = app.path().app_cache_dir()
         .context("Failed to get cache dir")?

@@ -122,7 +122,7 @@ With helpful callout explaining why it's disabled.
 
 1. Enable "Debug Mode" checkbox in Inpaint panel
 2. Run Inpaint (LaMa or NewLaMa)
-3. Check `%LOCALAPPDATA%\com.koharu.dev\cache\inpaint_debug\`
+3. Check `AppData\Local\koharu\inpaint_debug`
 4. **Verify**:
    - Red overlay shows mask aligned perfectly with text (no spill)
    - Mask is binary (pure black/white, no gray)

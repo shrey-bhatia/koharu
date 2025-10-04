@@ -3168,6 +3168,7 @@ dependencies = [
  "comic-text-detector",
  "font-kit",
  "image",
+ "imageproc",
  "lama",
  "log",
  "manga-ocr",
