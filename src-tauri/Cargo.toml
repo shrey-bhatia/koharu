@@ -29,6 +29,7 @@ ort = { workspace = true }
 tracing-subscriber = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
 image = { workspace = true }
+font-kit = { workspace = true }
 
 # internal dependencies
 comic-text-detector = { path = "../comic-text-detector" }

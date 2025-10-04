@@ -119,15 +119,19 @@ export default function RenderPanel() {
         ctx.fill()
       }
 
-      // 3. Draw translated text with font support and proper wrapping
+      // 3. Draw translated text with advanced typography support and proper wrapping
       for (const block of textBlocks) {
         if (!block.translatedText || !block.fontSize || !block.textColor) continue
 
         const textColor = block.manualTextColor || block.textColor
         const fontFamily = block.fontFamily || 'Arial'
+        const fontWeight = block.fontWeight || 'normal'
+        const fontStretch = block.fontStretch || 'normal'
+        const letterSpacing = block.letterSpacing || 0
 
         ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
-        ctx.font = `${block.fontSize}px ${fontFamily}`
+        ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
+        ctx.letterSpacing = `${letterSpacing}px`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
 

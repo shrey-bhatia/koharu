@@ -3,19 +3,21 @@
 import { Select, Text } from '@radix-ui/themes'
 import { useEditorStore, RGB } from '@/lib/state'
 import { rgbToHex, hexToRgb } from '@/utils/color-extraction'
+import { useState, useEffect } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 
-// Common web-safe fonts
-const FONT_OPTIONS = [
-  { value: 'Arial', label: 'Arial', preview: 'Arial' },
-  { value: 'Helvetica', label: 'Helvetica', preview: 'Helvetica' },
-  { value: 'Times New Roman', label: 'Times New Roman', preview: 'serif' },
-  { value: 'Georgia', label: 'Georgia', preview: 'Georgia' },
-  { value: 'Verdana', label: 'Verdana', preview: 'Verdana' },
-  { value: 'Courier New', label: 'Courier New', preview: 'monospace' },
-  { value: 'Comic Sans MS', label: 'Comic Sans MS', preview: 'cursive' },
-  { value: 'Impact', label: 'Impact', preview: 'Impact' },
-  { value: 'Trebuchet MS', label: 'Trebuchet MS', preview: 'sans-serif' },
-  { value: 'Tahoma', label: 'Tahoma', preview: 'Tahoma' },
+// Fallback fonts if system fonts fail to load
+const FALLBACK_FONTS = [
+  'Arial',
+  'Helvetica',
+  'Times New Roman',
+  'Georgia',
+  'Verdana',
+  'Courier New',
+  'Comic Sans MS',
+  'Impact',
+  'Trebuchet MS',
+  'Tahoma',
 ]
 
 interface RenderCustomizationProps {
@@ -26,6 +28,24 @@ interface RenderCustomizationProps {
 export default function RenderCustomization({ blockIndex, onReProcess }: RenderCustomizationProps) {
   const { textBlocks, setTextBlocks } = useEditorStore()
   const block = textBlocks[blockIndex]
+  const [systemFonts, setSystemFonts] = useState<string[]>(FALLBACK_FONTS)
+  const [loadingFonts, setLoadingFonts] = useState(true)
+
+  // Fetch system fonts on mount
+  useEffect(() => {
+    const fetchFonts = async () => {
+      try {
+        const fonts = await invoke<string[]>('get_system_fonts')
+        setSystemFonts(fonts)
+      } catch (error) {
+        console.error('Failed to load system fonts, using fallback:', error)
+        setSystemFonts(FALLBACK_FONTS)
+      } finally {
+        setLoadingFonts(false)
+      }
+    }
+    fetchFonts()
+  }, [])
 
   const updateBlock = (updates: Partial<typeof block>) => {
     const updated = [...textBlocks]
@@ -107,26 +127,89 @@ export default function RenderCustomization({ blockIndex, onReProcess }: RenderC
         />
       </div>
 
-      {/* Font Family - Simple dropdown for now */}
+      {/* Letter Spacing */}
       <div className='space-y-1'>
         <label className='text-xs font-medium text-gray-600 dark:text-gray-400'>
-          Font Family
+          Letter Spacing: {block.letterSpacing || 0}px
+        </label>
+        <input
+          type='range'
+          min='-5'
+          max='20'
+          step='0.5'
+          value={block.letterSpacing || 0}
+          onChange={(e) => updateBlock({ letterSpacing: parseFloat(e.target.value) })}
+          className='w-full'
+        />
+      </div>
+
+      {/* Font Weight */}
+      <div className='space-y-1'>
+        <label className='text-xs font-medium text-gray-600 dark:text-gray-400'>
+          Font Weight
+        </label>
+        <select
+          value={block.fontWeight || 'normal'}
+          onChange={(e) => {
+            const val = e.target.value
+            updateBlock({ fontWeight: val === 'normal' || val === 'bold' ? val : parseInt(val) })
+          }}
+          className='w-full rounded border border-gray-300 p-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white'
+        >
+          <option value='normal'>Normal (400)</option>
+          <option value='bold'>Bold (700)</option>
+          <option value='100'>Thin (100)</option>
+          <option value='300'>Light (300)</option>
+          <option value='500'>Medium (500)</option>
+          <option value='600'>Semi-Bold (600)</option>
+          <option value='800'>Extra-Bold (800)</option>
+          <option value='900'>Black (900)</option>
+        </select>
+      </div>
+
+      {/* Font Stretch */}
+      <div className='space-y-1'>
+        <label className='text-xs font-medium text-gray-600 dark:text-gray-400'>
+          Font Stretch
+        </label>
+        <select
+          value={block.fontStretch || 'normal'}
+          onChange={(e) => updateBlock({ fontStretch: e.target.value as 'normal' | 'condensed' | 'expanded' })}
+          className='w-full rounded border border-gray-300 p-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white'
+        >
+          <option value='normal'>Normal</option>
+          <option value='condensed'>Condensed</option>
+          <option value='expanded'>Expanded</option>
+        </select>
+      </div>
+
+      {/* Font Family */}
+      <div className='space-y-1'>
+        <label className='text-xs font-medium text-gray-600 dark:text-gray-400'>
+          Font Family {loadingFonts && '(Loading...)'}
         </label>
         <select
           value={block.fontFamily || 'Arial'}
           onChange={(e) => updateBlock({ fontFamily: e.target.value })}
           className='w-full rounded border border-gray-300 p-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white'
           style={{ fontFamily: block.fontFamily || 'Arial' }}
+          disabled={loadingFonts}
         >
-          {FONT_OPTIONS.map((font) => (
-            <option key={font.value} value={font.value} style={{ fontFamily: font.value }}>
-              {font.label}
+          {systemFonts.map((font) => (
+            <option key={font} value={font} style={{ fontFamily: font }}>
+              {font}
             </option>
           ))}
         </select>
         <div
           className='mt-1 rounded border border-gray-200 p-2 text-center dark:border-gray-600 dark:bg-gray-700'
-          style={{ fontFamily: block.fontFamily || 'Arial', fontSize: block.fontSize || 16 }}
+          style={{
+            fontFamily: block.fontFamily || 'Arial',
+            fontSize: block.fontSize || 16,
+            letterSpacing: `${block.letterSpacing || 0}px`,
+            fontWeight: block.fontWeight || 'normal',
+            fontStretch: block.fontStretch || 'normal',
+          }}
         >
           <Text className='dark:text-white'>Preview: {block.translatedText || 'Sample text'}</Text>
         </div>

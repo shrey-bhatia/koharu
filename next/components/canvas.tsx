@@ -113,7 +113,13 @@ function Canvas() {
                           y={ymin}
                           width={width}
                           height={height}
-                          stroke={selectedBlockIndex === index ? 'blue' : 'red'}
+                          stroke={
+                            selectedBlockIndex === index
+                              ? 'blue'
+                              : block.ocrStale
+                                ? 'orange'
+                                : 'red'
+                          }
                           strokeWidth={(selectedBlockIndex === index ? 3 : 2) / scale}
                           strokeScaleEnabled={false}
                           onClick={(e) => {
@@ -132,6 +138,7 @@ function Canvas() {
                               ymin: newY,
                               xmax: newX + width,
                               ymax: newY + height,
+                              ocrStale: true, // Mark as stale when moved
                             }
                             setTextBlocks(updated)
                           }}

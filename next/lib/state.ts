@@ -22,9 +22,14 @@ export type TextBlock = {
   textColor?: RGB
   fontSize?: number
   fontFamily?: string
+  letterSpacing?: number // in pixels
+  fontWeight?: number | 'normal' | 'bold' // 100-900 or keywords
+  fontStretch?: 'normal' | 'condensed' | 'expanded' // font-stretch values
   // Manual overrides
   manualBgColor?: RGB
   manualTextColor?: RGB
+  // OCR tracking
+  ocrStale?: boolean // true if box moved since last OCR
 }
 
 // Load API key from localStorage (browser/Tauri context)

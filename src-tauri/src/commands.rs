@@ -1,5 +1,6 @@
 use anyhow::Context;
 use tauri::{AppHandle, Manager};
+use font_kit::source::SystemSource;
 
 use crate::{AppState, error::CommandResult};
 
@@ -61,4 +62,17 @@ pub async fn inpaint(app: AppHandle, image: Vec<u8>, mask: Vec<u8>) -> CommandRe
         .context("Failed to encode inpainted image as PNG")?;
 
     Ok(png_bytes)
+}
+
+#[tauri::command]
+pub fn get_system_fonts() -> CommandResult<Vec<String>> {
+    let source = SystemSource::new();
+    let mut fonts = source
+        .all_families()
+        .context("Failed to enumerate system fonts")?;
+
+    // Sort alphabetically for better UX
+    fonts.sort();
+
+    Ok(fonts)
 }
