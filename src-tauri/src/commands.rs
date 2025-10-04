@@ -43,7 +43,11 @@ pub async fn ocr(app: AppHandle, image: Vec<u8>) -> CommandResult<String> {
     Ok(result)
 }
 
+/// DEPRECATED: Full-image inpainting - replaced by inpaint_region with per-block processing
+/// This function produces suboptimal results (white fills) and should not be used.
+/// Use inpaint_region instead for proper cropping, erosion, and mask handling.
 #[tauri::command]
+#[deprecated(note = "Use inpaint_region instead - this produces white artifacts")]
 pub async fn inpaint(app: AppHandle, image: Vec<u8>, mask: Vec<u8>) -> CommandResult<Vec<u8>> {
     let state = app.state::<AppState>();
 

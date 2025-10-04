@@ -38,7 +38,9 @@ export default function InpaintPanel() {
     } else if (renderMethod === 'lama') {
       await runLocalizedInpainting()
     } else {
-      await runFullInpainting()
+      // Rectangle fill doesn't use AI inpainting
+      setError('Rectangle fill is selected. Inpainting is not needed for this mode.')
+      return
     }
   }
 

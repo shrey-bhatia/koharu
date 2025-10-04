@@ -142,21 +142,23 @@ export default function RenderPanel() {
       // 1. Draw base image (original or textless)
       ctx.drawImage(baseImage, 0, 0)
 
-      // 2. Draw rounded rectangles
-      for (const block of textBlocks) {
-        if (!block.backgroundColor) continue
+      // 2. Draw rounded rectangles (ONLY for Rectangle Fill mode)
+      if (renderMethod === 'rectangle') {
+        for (const block of textBlocks) {
+          if (!block.backgroundColor) continue
 
-        const bg = block.manualBgColor || block.backgroundColor
-        const x = block.xmin
-        const y = block.ymin
-        const width = block.xmax - block.xmin
-        const height = block.ymax - block.ymin
-        const radius = 5
+          const bg = block.manualBgColor || block.backgroundColor
+          const x = block.xmin
+          const y = block.ymin
+          const width = block.xmax - block.xmin
+          const height = block.ymax - block.ymin
+          const radius = 5
 
-        ctx.fillStyle = `rgb(${bg.r}, ${bg.g}, ${bg.b})`
-        ctx.beginPath()
-        ctx.roundRect(x, y, width, height, radius)
-        ctx.fill()
+          ctx.fillStyle = `rgb(${bg.r}, ${bg.g}, ${bg.b})`
+          ctx.beginPath()
+          ctx.roundRect(x, y, width, height, radius)
+          ctx.fill()
+        }
       }
 
       // Save 'withRectangles' stage (base + backgrounds, no text yet)
