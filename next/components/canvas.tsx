@@ -20,6 +20,38 @@ function Canvas() {
   const inpaintLayerRef = useRef<Konva.Layer>(null)
 
   const [selected, setSelected] = useState<any>(null)
+  const transformerRef = useRef<Konva.Transformer>(null)
+
+  // Handler for when a box is transformed (scaled/rotated/resized)
+  const handleTransformEnd = (index: number) => {
+    const node = selected
+    if (!node) return
+
+    const scaleX = node.scaleX()
+    const scaleY = node.scaleY()
+
+    // Get the current position after transformation
+    const x = node.x()
+    const y = node.y()
+    const width = node.width() * scaleX
+    const height = node.height() * scaleY
+
+    // Reset the scale to 1 (we've already applied it to width/height)
+    node.scaleX(1)
+    node.scaleY(1)
+
+    // Update state with new dimensions
+    const updated = [...textBlocks]
+    updated[index] = {
+      ...updated[index],
+      xmin: x,
+      ymin: y,
+      xmax: x + width,
+      ymax: y + height,
+      ocrStale: true, // Mark as stale when resized
+    }
+    setTextBlocks(updated)
+  }
 
   return (
     <>
@@ -142,6 +174,7 @@ function Canvas() {
                             }
                             setTextBlocks(updated)
                           }}
+                          onTransformEnd={() => handleTransformEnd(index)}
                         />
                         <Circle
                           key={`circle-${index}`}
@@ -164,7 +197,7 @@ function Canvas() {
                       </>
                     )
                   })}
-                  {selected && <Transformer nodes={[selected]} />}
+                  {selected && <Transformer ref={transformerRef} nodes={[selected]} />}
                 </Layer>
               )}
               <Layer>{tool === 'segmentation' && <Image image={null} />}</Layer>
