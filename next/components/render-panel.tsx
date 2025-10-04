@@ -1,14 +1,24 @@
 'use client'
 
-import { useState } from 'react'
-import { Button, Callout, Progress, Select, Badge } from '@radix-ui/themes'
+import { useState, useEffect } from 'react'
+import { Button, Callout, Progress, Select, Badge, Text } from '@radix-ui/themes'
 import { Play, Download, AlertCircle, CheckCircle } from 'lucide-react'
 import { useEditorStore } from '@/lib/state'
 import { extractBackgroundColor } from '@/utils/color-extraction'
 import { ensureReadableContrast } from '@/utils/wcag-contrast'
 import { calculateOptimalFontSize } from '@/utils/font-sizing'
 import { createImageFromBuffer } from '@/lib/image'
+import { invoke } from '@tauri-apps/api/core'
 import RenderCustomization from './render-customization'
+
+interface GpuStatus {
+  requested_provider: string
+  active_provider: string
+  device_id: number
+  device_name: string | null
+  success: boolean
+  warmup_time_ms: number
+}
 
 export default function RenderPanel() {
   const { image, textBlocks, setTextBlocks, renderMethod, setRenderMethod, inpaintedImage, setPipelineStage, setCurrentStage } = useEditorStore()
@@ -16,6 +26,20 @@ export default function RenderPanel() {
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [selectedBlock, setSelectedBlock] = useState<number | null>(null)
+  const [gpuStatus, setGpuStatus] = useState<GpuStatus | null>(null)
+
+  useEffect(() => {
+    loadGpuStatus()
+  }, [])
+
+  const loadGpuStatus = async () => {
+    try {
+      const status = await invoke<GpuStatus>('get_current_gpu_status')
+      setGpuStatus(status)
+    } catch (err) {
+      console.error('Failed to load GPU status:', err)
+    }
+  }
 
   const processColors = async () => {
     if (!image) {
@@ -246,6 +270,32 @@ export default function RenderPanel() {
           Export
         </Button>
       </div>
+
+      {/* GPU Status */}
+      {gpuStatus && (
+        <div className='border-t border-gray-200 p-3 dark:border-gray-700'>
+          <label className='text-xs font-semibold text-gray-600 dark:text-gray-400'>
+            GPU Status
+          </label>
+          <div className='mt-1 flex items-center gap-2'>
+            <Badge
+              color={gpuStatus.success && !gpuStatus.active_provider.includes('fallback') ? 'green' : 'red'}
+              size='2'
+            >
+              {gpuStatus.success ? '✓' : '✗'} {gpuStatus.active_provider}
+              {gpuStatus.device_name && ` (${gpuStatus.device_name})`}
+            </Badge>
+            {gpuStatus.warmup_time_ms > 0 && (
+              <Text size='1' color='gray'>{gpuStatus.warmup_time_ms}ms</Text>
+            )}
+          </div>
+          {gpuStatus.active_provider.includes('fallback') && (
+            <Callout.Root color='yellow' size='1' className='mt-2'>
+              <Callout.Text>Warning: GPU may have fallen back to CPU. Check Settings.</Callout.Text>
+            </Callout.Root>
+          )}
+        </div>
+      )}
 
       {/* Method Toggle */}
       <div className='border-t border-gray-200 p-3 dark:border-gray-700'>

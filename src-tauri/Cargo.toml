@@ -30,6 +30,8 @@ tracing-subscriber = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
 image = { workspace = true }
 font-kit = { workspace = true }
+wgpu = "0.19"
+nvml-wrapper = { version = "0.10", optional = true }
 
 # internal dependencies
 comic-text-detector = { path = "../comic-text-detector" }
@@ -37,5 +39,6 @@ manga-ocr = { path = "../manga-ocr" }
 lama = { path = "../lama" }
 
 [features]
-cuda = ["ort/cuda"]
+cuda = ["ort/cuda", "nvml-wrapper"]
+directml = ["ort/directml"]
 default = ["cuda"]

@@ -230,3 +230,48 @@ pub fn set_gpu_preference(app: AppHandle, preference: String) -> CommandResult<(
 
     Ok(())
 }
+
+#[derive(serde::Serialize)]
+pub struct GpuDevice {
+    pub device_id: u32,
+    pub name: String,
+    pub vendor: String,
+    pub backend: String,
+}
+
+#[tauri::command]
+pub fn get_gpu_devices() -> CommandResult<Vec<GpuDevice>> {
+    use wgpu::{Instance, InstanceDescriptor, Backends};
+
+    let instance = Instance::new(InstanceDescriptor {
+        backends: Backends::all(),
+        ..Default::default()
+    });
+
+    let adapters = instance.enumerate_adapters(Backends::all());
+    let mut devices = Vec::new();
+
+    for (idx, adapter) in adapters.iter().enumerate() {
+        let info = adapter.get_info();
+        devices.push(GpuDevice {
+            device_id: idx as u32,
+            name: info.name.clone(),
+            vendor: match info.vendor {
+                0x10DE => "NVIDIA".to_string(),
+                0x1002 | 0x1022 => "AMD".to_string(),
+                0x8086 => "Intel".to_string(),
+                _ => format!("Unknown (0x{:04X})", info.vendor),
+            },
+            backend: format!("{:?}", info.backend),
+        });
+    }
+
+    Ok(devices)
+}
+
+#[tauri::command]
+pub fn get_current_gpu_status(app: AppHandle) -> CommandResult<crate::state::GpuInitResult> {
+    let state = app.state::<AppState>();
+    let init_result = state.gpu_init_result.blocking_lock();
+    Ok(init_result.clone())
+}

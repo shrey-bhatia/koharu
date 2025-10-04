@@ -104,7 +104,7 @@ export default function InpaintPanel() {
             xmax: block.xmax,
             ymax: block.ymax,
           },
-          padding: 25,
+          padding: 40,  // Option 2: Increased padding for better context
         })
 
         const blob = new Blob([new Uint8Array(result.image)])
@@ -167,7 +167,7 @@ export default function InpaintPanel() {
             xmax: block.xmax,
             ymax: block.ymax,
           },
-          padding: 25,
+          padding: 50,
         })
 
         const blob = new Blob([new Uint8Array(result.image)])
