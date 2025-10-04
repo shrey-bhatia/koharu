@@ -103,9 +103,11 @@ pub async fn inpaint_region(
     mask: Vec<u8>,
     bbox: BBox,
     padding: Option<i32>,
+    debug_mode: Option<bool>,
 ) -> CommandResult<InpaintedRegion> {
     let state = app.state::<AppState>();
     let padding = padding.unwrap_or(20);
+    let debug = debug_mode.unwrap_or(false);
 
     // Load images
     let full_image = image::load_from_memory(&image).context("Failed to load image")?;
@@ -113,6 +115,15 @@ pub async fn inpaint_region(
     let full_mask = full_mask_img.to_luma8();
 
     let (orig_width, orig_height) = full_image.dimensions();
+    
+    // Log original dimensions
+    tracing::debug!(
+        "inpaint_region: orig={}x{}, mask={}x{}, bbox=[{},{} -> {},{}], padding={}px",
+        orig_width, orig_height,
+        full_mask.width(), full_mask.height(),
+        bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax,
+        padding
+    );
 
     // Add padding for context
     let padded_bbox = BBox {
@@ -121,10 +132,23 @@ pub async fn inpaint_region(
         xmax: (bbox.xmax + padding as f32).min(orig_width as f32),
         ymax: (bbox.ymax + padding as f32).min(orig_height as f32),
     };
+    
+    // Assert valid bbox
+    anyhow::ensure!(
+        padded_bbox.xmax > padded_bbox.xmin && padded_bbox.ymax > padded_bbox.ymin,
+        "Invalid padded bbox: [{},{} -> {},{}]",
+        padded_bbox.xmin, padded_bbox.ymin, padded_bbox.xmax, padded_bbox.ymax
+    );
 
     // Crop image region
     let crop_width = (padded_bbox.xmax - padded_bbox.xmin) as u32;
     let crop_height = (padded_bbox.ymax - padded_bbox.ymin) as u32;
+    
+    tracing::debug!(
+        "Padded bbox: [{},{} -> {},{}] = {}x{}px",
+        padded_bbox.xmin, padded_bbox.ymin, padded_bbox.xmax, padded_bbox.ymax,
+        crop_width, crop_height
+    );
 
     let cropped_image = full_image.crop_imm(
         padded_bbox.xmin as u32,
@@ -142,15 +166,37 @@ pub async fn inpaint_region(
         crop_width,
         crop_height,
     )?;
+    
+    // Debug: Save triptych if debug mode enabled
+    if debug {
+        save_debug_triptych(
+            &app,
+            &cropped_image,
+            &cropped_mask,
+            &bbox,
+            &padded_bbox,
+        )?;
+    }
 
     // Run LaMa inference (convert GrayImage to DynamicImage)
-    let mask_dynamic = image::DynamicImage::ImageLuma8(cropped_mask);
+    let mask_dynamic = image::DynamicImage::ImageLuma8(cropped_mask.clone());
     let inpainted_crop = state
         .lama
         .lock()
         .await
         .inference(&cropped_image, &mask_dynamic)
         .context("Failed to perform inpainting")?;
+    
+    // Debug: Save triptych output if debug mode enabled
+    if debug {
+        save_debug_output(
+            &app,
+            &cropped_image,
+            &cropped_mask,
+            &inpainted_crop,
+            &bbox,
+        )?;
+    }
 
     // Encode as PNG
     let mut png_bytes = Vec::new();
@@ -178,39 +224,184 @@ fn extract_and_resize_mask(
     target_width: u32,
     target_height: u32,
 ) -> anyhow::Result<image::GrayImage> {
-    // Scale factors: original → 1024×1024 mask
-    let scale_x = 1024.0 / orig_width as f32;
-    let scale_y = 1024.0 / orig_height as f32;
+    // Scale factors: original → 1024×1024 mask (assuming mask is 1024x1024)
+    let mask_width = full_mask.width();
+    let mask_height = full_mask.height();
+    let scale_x = mask_width as f32 / orig_width as f32;
+    let scale_y = mask_height as f32 / orig_height as f32;
 
-    // Map bbox to mask coordinates
+    // Map bbox to mask coordinates using consistent floor/ceil
     let mask_xmin = (bbox.xmin * scale_x).floor().max(0.0) as u32;
     let mask_ymin = (bbox.ymin * scale_y).floor().max(0.0) as u32;
-    let mask_xmax = (bbox.xmax * scale_x).ceil().min(1024.0) as u32;
-    let mask_ymax = (bbox.ymax * scale_y).ceil().min(1024.0) as u32;
+    let mask_xmax = (bbox.xmax * scale_x).ceil().min(mask_width as f32) as u32;
+    let mask_ymax = (bbox.ymax * scale_y).ceil().min(mask_height as f32) as u32;
 
-    let mask_crop_width = mask_xmax - mask_xmin;
-    let mask_crop_height = mask_ymax - mask_ymin;
+    let mask_crop_width = mask_xmax.saturating_sub(mask_xmin);
+    let mask_crop_height = mask_ymax.saturating_sub(mask_ymin);
+    
+    tracing::debug!(
+        "Mask extraction: scale=({:.3},{:.3}), mask_bbox=[{},{} -> {},{}], crop={}x{}",
+        scale_x, scale_y,
+        mask_xmin, mask_ymin, mask_xmax, mask_ymax,
+        mask_crop_width, mask_crop_height
+    );
+    
+    anyhow::ensure!(
+        mask_crop_width > 0 && mask_crop_height > 0,
+        "Invalid mask crop dimensions: {}x{}",
+        mask_crop_width, mask_crop_height
+    );
 
     // Crop mask with bounds checking
     let mut cropped_mask = image::GrayImage::new(mask_crop_width, mask_crop_height);
     for y in 0..mask_crop_height {
         for x in 0..mask_crop_width {
-            let px = (mask_xmin + x).min(1023);
-            let py = (mask_ymin + y).min(1023);
+            let px = (mask_xmin + x).min(mask_width - 1);
+            let py = (mask_ymin + y).min(mask_height - 1);
             let pixel = full_mask.get_pixel(px, py);
             cropped_mask.put_pixel(x, y, *pixel);
         }
     }
 
-    // Resize to match image crop
-    let resized_mask = image::imageops::resize(
+    // Resize to match image crop using NEAREST for masks (no interpolation)
+    let mut resized_mask = image::imageops::resize(
         &cropped_mask,
         target_width,
         target_height,
-        image::imageops::FilterType::Lanczos3,
+        image::imageops::FilterType::Nearest,
+    );
+    
+    // Apply slight erosion to pull mask away from edges (prevent halos)
+    resized_mask = erode_mask(&resized_mask, 3);
+    
+    tracing::debug!(
+        "Mask resized: {}x{} -> {}x{} (nearest-neighbor + 3px erosion)",
+        mask_crop_width, mask_crop_height,
+        target_width, target_height
     );
 
     Ok(resized_mask)
+}
+
+/// Simple erosion: shrink white regions by kernel_size pixels
+fn erode_mask(mask: &image::GrayImage, kernel_size: u32) -> image::GrayImage {
+    use imageproc::morphology::dilate_mut;
+    use imageproc::distance_transform::Norm;
+    
+    let mut result = mask.clone();
+    
+    // Invert (so white becomes black), dilate (grows black), invert back (shrinks white)
+    for pixel in result.pixels_mut() {
+        pixel[0] = 255 - pixel[0];
+    }
+    
+    dilate_mut(&mut result, Norm::LInf, kernel_size as u8);
+    
+    for pixel in result.pixels_mut() {
+        pixel[0] = 255 - pixel[0];
+    }
+    
+    result
+}
+
+/// Save debug triptych: original crop, mask, and red overlay
+fn save_debug_triptych(
+    app: &AppHandle,
+    crop: &image::DynamicImage,
+    mask: &image::GrayImage,
+    bbox: &BBox,
+    padded_bbox: &BBox,
+) -> anyhow::Result<()> {
+    let debug_dir = app.path().app_cache_dir()
+        .context("Failed to get cache dir")?
+        .join("inpaint_debug");
+    
+    fs::create_dir_all(&debug_dir)?;
+    
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    
+    let bbox_str = format!("{:.0}_{:.0}", bbox.xmin, bbox.ymin);
+    
+    // Save crop
+    crop.save(debug_dir.join(format!("{}_{}_crop.png", timestamp, bbox_str)))?;
+    
+    // Save mask
+    image::DynamicImage::ImageLuma8(mask.clone())
+        .save(debug_dir.join(format!("{}_{}_mask.png", timestamp, bbox_str)))?;
+    
+    // Create red overlay
+    let mut overlay = crop.to_rgb8();
+    for y in 0..mask.height() {
+        for x in 0..mask.width() {
+            if mask.get_pixel(x, y)[0] > 128 {
+                // Red overlay on white mask regions
+                overlay.put_pixel(x, y, image::Rgb([255, 0, 0]));
+            }
+        }
+    }
+    image::DynamicImage::ImageRgb8(overlay)
+        .save(debug_dir.join(format!("{}_{}_overlay.png", timestamp, bbox_str)))?;
+    
+    tracing::info!("Saved debug triptych to {:?}", debug_dir);
+    Ok(())
+}
+
+/// Save debug output after inpainting
+fn save_debug_output(
+    app: &AppHandle,
+    crop: &image::DynamicImage,
+    mask: &image::GrayImage,
+    output: &image::DynamicImage,
+    bbox: &BBox,
+) -> anyhow::Result<()> {
+    let debug_dir = app.path().app_cache_dir()
+        .context("Failed to get cache dir")?
+        .join("inpaint_debug");
+    
+    fs::create_dir_all(&debug_dir)?;
+    
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    
+    let bbox_str = format!("{:.0}_{:.0}", bbox.xmin, bbox.ymin);
+    
+    // Create side-by-side triptych
+    let w = crop.width();
+    let h = crop.height();
+    let mut triptych = image::RgbImage::new(w * 3, h);
+    
+    // Panel 1: Original crop
+    let crop_rgb = crop.to_rgb8();
+    for y in 0..h {
+        for x in 0..w {
+            triptych.put_pixel(x, y, *crop_rgb.get_pixel(x, y));
+        }
+    }
+    
+    // Panel 2: Mask (white = hole to fill)
+    for y in 0..h {
+        for x in 0..w {
+            let v = mask.get_pixel(x, y)[0];
+            triptych.put_pixel(w + x, y, image::Rgb([v, v, v]));
+        }
+    }
+    
+    // Panel 3: LaMa output
+    let output_rgb = output.to_rgb8();
+    for y in 0..h {
+        for x in 0..w {
+            triptych.put_pixel(w * 2 + x, y, *output_rgb.get_pixel(x, y));
+        }
+    }
+    
+    image::DynamicImage::ImageRgb8(triptych)
+        .save(debug_dir.join(format!("{}_{}_triptych.png", timestamp, bbox_str)))?;
+    
+    tracing::info!("Saved inpaint triptych to {:?}", debug_dir);
+    Ok(())
 }
 
 #[tauri::command]

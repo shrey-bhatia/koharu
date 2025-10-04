@@ -25,6 +25,7 @@ export default function InpaintPanel() {
   const [progress, setProgress] = useState(0)
   const [currentBlock, setCurrentBlock] = useState(0)
   const [cancelled, setCancelled] = useState(false)
+  const [debugMode, setDebugMode] = useState(false)
 
   const runInpaint = async () => {
     if (!image || !segmentationMask || textBlocks.length === 0) {
@@ -105,6 +106,7 @@ export default function InpaintPanel() {
             ymax: block.ymax,
           },
           padding: 40,  // Option 2: Increased padding for better context
+          debugMode,     // Enable debug triptych exports
         })
 
         const blob = new Blob([new Uint8Array(result.image)])
@@ -168,6 +170,7 @@ export default function InpaintPanel() {
             ymax: block.ymax,
           },
           padding: 50,
+          debugMode,     // Enable debug triptych exports
         })
 
         const blob = new Blob([new Uint8Array(result.image)])
@@ -263,6 +266,22 @@ export default function InpaintPanel() {
               {textBlocks.length > 0 ? `${textBlocks.length} detected` : 'None'}
             </span>
           </div>
+        </div>
+        
+        {/* Debug Mode Toggle */}
+        <div className='flex items-center justify-between text-sm'>
+          <label className='flex items-center gap-2 cursor-pointer'>
+            <input
+              type='checkbox'
+              checked={debugMode}
+              onChange={(e) => setDebugMode(e.target.checked)}
+              className='rounded'
+            />
+            <span>Debug Mode</span>
+          </label>
+          {debugMode && (
+            <Text size='1' color='gray'>Saves triptych images</Text>
+          )}
         </div>
 
         {/* Error */}
