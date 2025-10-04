@@ -211,10 +211,12 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
     tracing::info!("Warmup completed in {}ms", init_result.warmup_time_ms);
 
     // Detect potential CPU fallback based on warmup latency
-    // CUDA should be <500ms, DirectML <800ms, CPU >2000ms
+    // Note: First run (cold start) can be slower than subsequent runs
+    // CUDA: typically <500ms after warmup, but first run can be ~1000ms
+    // DirectML: typically <1000ms after warmup, but first run can be ~1500ms
     let expected_max_time = match gpu_pref.as_str() {
-        "cuda" => 800,      // CUDA warmup should be fast
-        "directml" => 1200, // DirectML slightly slower
+        "cuda" => 1500,     // CUDA warmup (includes model loading)
+        "directml" => 2000, // DirectML warmup (includes model loading)
         "cpu" => u32::MAX,  // CPU is expected to be slow
         _ => u32::MAX,
     };

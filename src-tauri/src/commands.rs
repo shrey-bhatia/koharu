@@ -92,6 +92,7 @@ pub struct BBox {
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InpaintConfig {
     pub padding: i32,              // Context padding (15-100px)
     pub target_size: u32,          // Inference resolution (256/384/512/768/1024)
@@ -143,6 +144,8 @@ pub async fn inpaint_region(
         debug_mode: debug_mode.unwrap_or(false),
         ..Default::default()
     });
+
+    tracing::info!("inpaint_region called with config: {:?}", cfg);
 
     // Load images
     let full_image = image::load_from_memory(&image).context("Failed to load image")?;
@@ -217,12 +220,17 @@ pub async fn inpaint_region(
 
     // Run LaMa inference with configurable target size (convert GrayImage to DynamicImage)
     let mask_dynamic = image::DynamicImage::ImageLuma8(cropped_mask.clone());
+
+    tracing::info!("Running LaMa inference with target_size={}", cfg.target_size);
+
     let inpainted_crop = state
         .lama
         .lock()
         .await
         .inference_with_size(&cropped_image, &mask_dynamic, cfg.target_size)
         .context("Failed to perform inpainting")?;
+
+    tracing::info!("LaMa inference completed successfully");
 
     // Debug: Save triptych output if debug mode enabled
     if cfg.debug_mode {
@@ -562,11 +570,11 @@ pub async fn run_gpu_stress_test(
     for i in 0..iterations {
         let start = std::time::Instant::now();
 
-        // Create test images at target size
-        let test_image = image::DynamicImage::new_rgb8(target_size, target_size);
-        let test_mask = image::DynamicImage::new_luma8(target_size, target_size);
+        // Create test images (512px hardcoded for consistent benchmark)
+        let test_image = image::DynamicImage::new_rgb8(512, 512);
+        let test_mask = image::DynamicImage::new_luma8(512, 512);
 
-        // Run LaMa inference
+        // Run LaMa inference (uses legacy 512px inference for compatibility)
         state.lama.lock().await.inference(&test_image, &test_mask)
             .context(format!("Stress test iteration {} failed", i + 1))?;
 
