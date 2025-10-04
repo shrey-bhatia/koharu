@@ -8,25 +8,88 @@ use manga_ocr::MangaOCR;
 use tauri::{AppHandle, Manager, async_runtime::spawn};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tokio::sync::Mutex;
+use std::fs;
 
 use crate::{
-    commands::{detection, inpaint, ocr, get_system_fonts, inpaint_region},
+    commands::{detection, inpaint, ocr, get_system_fonts, inpaint_region, set_gpu_preference},
     state::AppState,
 };
 
+// Read GPU preference from config file
+fn read_gpu_preference(app: &AppHandle) -> String {
+    let app_dir = app.path().app_config_dir()
+        .expect("Failed to get app config directory");
+
+    fs::create_dir_all(&app_dir).ok();
+
+    let config_path = app_dir.join("gpu_preference.txt");
+
+    fs::read_to_string(&config_path)
+        .unwrap_or_else(|_| "cuda".to_string())
+        .trim()
+        .to_string()
+}
+
 // Initialize models
 async fn initialize(app: AppHandle) -> anyhow::Result<()> {
+    let gpu_pref = read_gpu_preference(&app);
+
+    tracing::info!("GPU Preference: {}", gpu_pref);
+
     // refer: https://ort.pyke.io/perf/execution-providers#global-defaults
-    ort::init()
-        .with_execution_providers([
+    match gpu_pref.as_str() {
+        "cuda" => {
             #[cfg(feature = "cuda")]
-            ort::execution_providers::CUDAExecutionProvider::default()
-                .build()
-                .error_on_failure(),
+            {
+                ort::init()
+                    .with_execution_providers([
+                        ort::execution_providers::CUDAExecutionProvider::default()
+                            .build()
+                            .error_on_failure(),
+                    ])
+                    .commit()?;
+                tracing::info!("Initialized ORT with CUDA");
+            }
             #[cfg(not(feature = "cuda"))]
-            ort::execution_providers::CPUExecutionProvider::default().build(),
-        ])
-        .commit()?;
+            {
+                tracing::warn!("CUDA requested but not available, falling back to CPU");
+                ort::init()
+                    .with_execution_providers([
+                        ort::execution_providers::CPUExecutionProvider::default().build(),
+                    ])
+                    .commit()?;
+            }
+        }
+        "directml" => {
+            #[cfg(windows)]
+            {
+                ort::init()
+                    .with_execution_providers([
+                        ort::execution_providers::DirectMLExecutionProvider::default()
+                            .build(),
+                    ])
+                    .commit()?;
+                tracing::info!("Initialized ORT with DirectML");
+            }
+            #[cfg(not(windows))]
+            {
+                tracing::warn!("DirectML only available on Windows, falling back to CPU");
+                ort::init()
+                    .with_execution_providers([
+                        ort::execution_providers::CPUExecutionProvider::default().build(),
+                    ])
+                    .commit()?;
+            }
+        }
+        "cpu" | _ => {
+            ort::init()
+                .with_execution_providers([
+                    ort::execution_providers::CPUExecutionProvider::default().build(),
+                ])
+                .commit()?;
+            tracing::info!("Initialized ORT with CPU");
+        }
+    }
 
     let comic_text_detector = ComicTextDetector::new()?;
     let manga_ocr = MangaOCR::new()?;
@@ -68,7 +131,7 @@ pub fn run() -> anyhow::Result<()> {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![detection, ocr, inpaint, get_system_fonts, inpaint_region])
+        .invoke_handler(tauri::generate_handler![detection, ocr, inpaint, get_system_fonts, inpaint_region, set_gpu_preference])
         .run(tauri::generate_context!())?;
 
     Ok(())

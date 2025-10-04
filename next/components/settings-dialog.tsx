@@ -5,6 +5,7 @@ import { Dialog, Button, TextField, Text, Callout, Select } from '@radix-ui/them
 import { Settings, CheckCircle, XCircle } from 'lucide-react'
 import { useEditorStore } from '@/lib/state'
 import { testApiKey } from '@/utils/translation'
+import { invoke } from '@tauri-apps/api/core'
 
 export default function SettingsDialog() {
   const { translationApiKey, setTranslationApiKey, gpuPreference, setGpuPreference } = useEditorStore()
@@ -63,6 +64,19 @@ export default function SettingsDialog() {
     setTranslationApiKey(null)
     setTestResult(null)
     setTestMessage('')
+  }
+
+  const handleGpuChange = async (value: 'cuda' | 'directml' | 'cpu') => {
+    setGpuPreference(value)
+    setGpuChanged(true)
+
+    // Save to backend config file
+    try {
+      await invoke('set_gpu_preference', { preference: value })
+      console.log(`GPU preference set to ${value}. Restart required.`)
+    } catch (err) {
+      console.error('Failed to save GPU preference:', err)
+    }
   }
 
   return (
@@ -154,10 +168,7 @@ export default function SettingsDialog() {
               </Text>
               <Select.Root
                 value={gpuPreference}
-                onValueChange={(value: 'cuda' | 'directml' | 'cpu') => {
-                  setGpuPreference(value)
-                  setGpuChanged(true)
-                }}
+                onValueChange={handleGpuChange}
               >
                 <Select.Trigger className='w-full' />
                 <Select.Content>

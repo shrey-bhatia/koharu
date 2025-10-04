@@ -2,6 +2,7 @@ use anyhow::Context;
 use tauri::{AppHandle, Manager};
 use font_kit::source::SystemSource;
 use image::GenericImageView;
+use std::fs;
 
 use crate::{AppState, error::CommandResult};
 
@@ -210,4 +211,22 @@ fn extract_and_resize_mask(
     );
 
     Ok(resized_mask)
+}
+
+#[tauri::command]
+pub fn set_gpu_preference(app: AppHandle, preference: String) -> CommandResult<()> {
+    let app_dir = app.path().app_config_dir()
+        .context("Failed to get app config directory")?;
+
+    fs::create_dir_all(&app_dir)
+        .context("Failed to create app config directory")?;
+
+    let config_path = app_dir.join("gpu_preference.txt");
+
+    fs::write(&config_path, preference.trim())
+        .context("Failed to write GPU preference")?;
+
+    tracing::info!("GPU preference saved. Restart required to take effect.");
+
+    Ok(())
 }
