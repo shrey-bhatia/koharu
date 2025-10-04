@@ -216,11 +216,25 @@ export default function InpaintPanel() {
           onClick={runInpaint}
           loading={loading}
           variant='soft'
-          disabled={!image || !segmentationMask}
+          disabled={!image || !segmentationMask || renderMethod === 'rectangle'}
         >
           <Play className='h-4 w-4' />
         </Button>
       </div>
+      
+      {/* Rectangle fill warning */}
+      {renderMethod === 'rectangle' && (
+        <div className='px-3'>
+          <Callout.Root color='blue' size='1'>
+            <Callout.Icon>
+              <AlertCircle className='h-4 w-4' />
+            </Callout.Icon>
+            <Callout.Text>
+              Rectangle fill doesn't require AI inpainting. Colors will be extracted during Render.
+            </Callout.Text>
+          </Callout.Root>
+        </div>
+      )}
 
       {/* Body */}
       <div className='flex flex-col gap-2 p-3'>

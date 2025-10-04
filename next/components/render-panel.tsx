@@ -65,10 +65,9 @@ export default function RenderPanel() {
     try {
       const updated = []
 
-      // Determine base image based on render method
-      const baseImage = (renderMethod === 'lama' || renderMethod === 'newlama') && inpaintedImage
-        ? inpaintedImage.bitmap
-        : image.bitmap
+      // CRITICAL FIX: Always extract colors from ORIGINAL image
+      // Never use inpainted image for color extraction (it's already white!)
+      const colorSourceImage = image.bitmap
 
       for (let i = 0; i < textBlocks.length; i++) {
         const block = textBlocks[i]
@@ -82,8 +81,8 @@ export default function RenderPanel() {
 
         console.log(`Processing block ${i + 1}/${textBlocks.length}...`)
 
-        // Extract background color from border (using appropriate base)
-        const colors = await extractBackgroundColor(baseImage, block, 10)
+        // Extract background color from ORIGINAL image border
+        const colors = await extractBackgroundColor(colorSourceImage, block, 10)
 
         // Ensure readable contrast
         const readable = ensureReadableContrast(
