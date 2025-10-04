@@ -15,7 +15,7 @@ import ScaleControl from './scale-control'
 import { useEditorStore } from '@/lib/state'
 
 function Canvas() {
-  const { tool, scale, image, textBlocks, inpaintedImage, selectedBlockIndex, setSelectedBlockIndex } = useEditorStore()
+  const { tool, scale, image, textBlocks, setTextBlocks, inpaintedImage, selectedBlockIndex, setSelectedBlockIndex } = useEditorStore()
   const containerRef = useRef<HTMLDivElement>(null)
   const inpaintLayerRef = useRef<Konva.Layer>(null)
 
@@ -114,28 +114,45 @@ function Canvas() {
                           width={width}
                           height={height}
                           stroke={selectedBlockIndex === index ? 'blue' : 'red'}
-                          strokeWidth={selectedBlockIndex === index ? 3 : 2}
+                          strokeWidth={(selectedBlockIndex === index ? 3 : 2) / scale}
+                          strokeScaleEnabled={false}
                           onClick={(e) => {
                             e.cancelBubble = true
                             setSelectedBlockIndex(index)
                             setSelected(e.target)
+                          }}
+                          draggable={true}
+                          onDragEnd={(e) => {
+                            const updated = [...textBlocks]
+                            const newX = e.target.x()
+                            const newY = e.target.y()
+                            updated[index] = {
+                              ...updated[index],
+                              xmin: newX,
+                              ymin: newY,
+                              xmax: newX + width,
+                              ymax: newY + height,
+                            }
+                            setTextBlocks(updated)
                           }}
                         />
                         <Circle
                           key={`circle-${index}`}
                           x={xmin}
                           y={ymin}
-                          radius={20}
+                          radius={20 / scale}
                           fill='rgba(255, 0, 0, 0.7)'
+                          listening={false}
                         />
                         <Text
                           key={`text-${index}`}
-                          x={xmin - 10}
-                          y={ymin - 15}
+                          x={xmin - 10 / scale}
+                          y={ymin - 15 / scale}
                           text={(index + 1).toString()}
-                          fontSize={30}
+                          fontSize={30 / scale}
                           fill='white'
                           fontFamily='sans-serif'
+                          listening={false}
                         />
                       </>
                     )

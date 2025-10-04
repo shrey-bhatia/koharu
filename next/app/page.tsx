@@ -22,9 +22,9 @@ function App() {
   }, [theme])
 
   return (
-    <main className='flex h-screen max-h-screen w-screen max-w-screen flex-col bg-gray-100 dark:bg-gray-900'>
+    <main className='flex h-screen max-h-screen w-screen max-w-screen flex-col bg-gray-200 dark:bg-gray-900'>
       <Topbar />
-      <div className='flex flex-1 overflow-hidden dark:bg-gray-900'>
+      <div className='flex flex-1 overflow-hidden bg-gray-200 dark:bg-gray-900'>
         <div className='flex h-full w-20 items-start p-3'>
           <Tools />
         </div>

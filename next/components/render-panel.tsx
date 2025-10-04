@@ -119,7 +119,7 @@ export default function RenderPanel() {
         ctx.fill()
       }
 
-      // 3. Draw translated text with font support
+      // 3. Draw translated text with font support and proper wrapping
       for (const block of textBlocks) {
         if (!block.translatedText || !block.fontSize || !block.textColor) continue
 
@@ -131,21 +131,41 @@ export default function RenderPanel() {
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
 
+        const boxWidth = block.xmax - block.xmin
+        const boxHeight = block.ymax - block.ymin
+        const maxWidth = boxWidth * 0.9 // 10% padding
         const centerX = (block.xmin + block.xmax) / 2
         const centerY = (block.ymin + block.ymax) / 2
 
-        // Handle multiline text
-        const lines = block.translatedText.split('\n')
-        const lineHeight = block.fontSize * 1.2
+        // Wrap text to fit within box width
+        const words = block.translatedText.split(' ')
+        const lines: string[] = []
+        let currentLine = ''
 
-        if (lines.length === 1) {
-          ctx.fillText(block.translatedText, centerX, centerY)
-        } else {
-          const startY = centerY - ((lines.length - 1) * lineHeight) / 2
-          lines.forEach((line, i) => {
-            ctx.fillText(line, centerX, startY + i * lineHeight)
-          })
+        for (const word of words) {
+          const testLine = currentLine + (currentLine ? ' ' : '') + word
+          const metrics = ctx.measureText(testLine)
+
+          if (metrics.width > maxWidth && currentLine !== '') {
+            lines.push(currentLine)
+            currentLine = word
+          } else {
+            currentLine = testLine
+          }
         }
+        if (currentLine) lines.push(currentLine)
+
+        const lineHeight = block.fontSize * 1.2
+        const totalHeight = lines.length * lineHeight
+
+        // Start from top if text is too tall, otherwise center vertically
+        const startY = totalHeight > boxHeight * 0.9
+          ? block.ymin + lineHeight / 2
+          : centerY - ((lines.length - 1) * lineHeight) / 2
+
+        lines.forEach((line, i) => {
+          ctx.fillText(line, centerX, startY + i * lineHeight, maxWidth)
+        })
       }
 
       // 4. Export as PNG
