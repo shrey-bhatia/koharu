@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Dialog, Button, TextField, Text, Callout, Select, Tabs } from '@radix-ui/themes'
+import { Dialog, Button, TextField, Text, Callout, Select, Tabs, TextArea } from '@radix-ui/themes'
 import { Settings, CheckCircle, XCircle } from 'lucide-react'
 import { useEditorStore } from '@/lib/state'
 import { testApiKey, TranslationProvider } from '@/utils/translation'
@@ -14,6 +14,10 @@ export default function SettingsDialog() {
     setTranslationApiKey,
     deeplApiKey,
     setDeeplApiKey,
+    ollamaModel,
+    setOllamaModel,
+    ollamaSystemPrompt,
+    setOllamaSystemPrompt,
     translationProvider,
     setTranslationProvider,
     gpuPreference,
@@ -24,6 +28,8 @@ export default function SettingsDialog() {
   const [open, setOpen] = useState(false)
   const [googleApiKeyInput, setGoogleApiKeyInput] = useState(translationApiKey || '')
   const [deeplApiKeyInput, setDeeplApiKeyInput] = useState(deeplApiKey || '')
+  const [ollamaModelInput, setOllamaModelInput] = useState(ollamaModel || 'gemma2:2b')
+  const [ollamaSystemPromptInput, setOllamaSystemPromptInput] = useState(ollamaSystemPrompt || '')
   const [selectedProvider, setSelectedProvider] = useState<TranslationProvider>(translationProvider)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null)
@@ -65,9 +71,13 @@ export default function SettingsDialog() {
   const handleSave = () => {
     const trimmedGoogleKey = googleApiKeyInput.trim()
     const trimmedDeeplKey = deeplApiKeyInput.trim()
+    const trimmedOllamaModel = ollamaModelInput.trim()
+    const trimmedOllamaPrompt = ollamaSystemPromptInput.trim()
 
     setTranslationApiKey(trimmedGoogleKey || null)
     setDeeplApiKey(trimmedDeeplKey || null)
+    setOllamaModel(trimmedOllamaModel || 'gemma2:2b')
+    setOllamaSystemPrompt(trimmedOllamaPrompt)
     setTranslationProvider(selectedProvider)
 
     setOpen(false)
@@ -78,6 +88,8 @@ export default function SettingsDialog() {
   const handleCancel = () => {
     setGoogleApiKeyInput(translationApiKey || '')
     setDeeplApiKeyInput(deeplApiKey || '')
+    setOllamaModelInput(ollamaModel || 'gemma2:2b')
+    setOllamaSystemPromptInput(ollamaSystemPrompt || '')
     setSelectedProvider(translationProvider)
     setOpen(false)
     setTestResult(null)
@@ -194,7 +206,7 @@ export default function SettingsDialog() {
                 </label>
               </div>
 
-              {/* API Key Input - Conditional based on provider (hidden for Ollama) */}
+              {/* API Key Input - for Google/DeepL */}
               {selectedProvider !== 'ollama' && (
                 <div className='space-y-2'>
                   <label>
@@ -243,6 +255,44 @@ export default function SettingsDialog() {
                         Clear
                       </Button>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* Ollama Model and System Prompt Inputs */}
+              {selectedProvider === 'ollama' && (
+                <div className='space-y-3'>
+                  <div className='space-y-2'>
+                    <label>
+                      <Text as='div' size='2' mb='1' weight='bold'>
+                        Ollama Model Name
+                      </Text>
+                      <TextField.Root
+                        placeholder='e.g., gemma2:2b, qwen2.5:3b, llama3.2:3b'
+                        value={ollamaModelInput}
+                        onChange={(e) => setOllamaModelInput(e.target.value)}
+                      />
+                    </label>
+                    <Text size='1' className='text-gray-600 dark:text-gray-400'>
+                      Enter the exact name of your Ollama model (e.g., josie-qwen2.5-manga)
+                    </Text>
+                  </div>
+
+                  <div className='space-y-2'>
+                    <label>
+                      <Text as='div' size='2' mb='1' weight='bold'>
+                        System Prompt (Optional)
+                      </Text>
+                      <TextArea
+                        placeholder='e.g., You are a Japanese-to-English translator. Output ONLY the English translation.'
+                        value={ollamaSystemPromptInput}
+                        onChange={(e) => setOllamaSystemPromptInput(e.target.value)}
+                        rows={3}
+                      />
+                    </label>
+                    <Text size='1' className='text-gray-600 dark:text-gray-400'>
+                      Leave empty to use the system prompt defined in your Ollama modelfile
+                    </Text>
                   </div>
                 </div>
               )}
@@ -314,15 +364,14 @@ export default function SettingsDialog() {
                       <strong>Using Ollama for Local LLM Translation:</strong>
                       <ol className='ml-4 mt-2 list-decimal space-y-1'>
                         <li>Install Ollama from ollama.com</li>
-                        <li>Start Ollama (runs on http://localhost:11434 by default)</li>
-                        <li>Pull a model: <code className='rounded bg-gray-200 px-1 dark:bg-gray-800'>ollama pull gemma2:2b</code></li>
-                        <li>Set your translation system prompt in Ollama</li>
+                        <li>Start Ollama (runs on http://localhost:11434)</li>
+                        <li>Configure your model and system prompt in Ollama</li>
                       </ol>
                       <div className='mt-2'>
                         <strong>Benefits:</strong> Free, unlimited, runs locally, no API key needed
                       </div>
                       <div className='mt-2 text-blue-700 dark:text-blue-500'>
-                        <strong>Note:</strong> The OCR'd Japanese text is passed directly to your model. Configure your system prompt in Ollama beforehand.
+                        <strong>Note:</strong> Raw OCR'd Japanese text is sent directly to Ollama. Set up your model and system prompt in Ollama beforehand.
                       </div>
                     </>
                   )}

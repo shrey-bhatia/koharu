@@ -138,6 +138,18 @@ const loadDeeplApiKey = (): string | null => {
   return localStorage.getItem('deepl_translate_api_key')
 }
 
+// Load Ollama model name from localStorage
+const loadOllamaModel = (): string => {
+  if (typeof window === 'undefined') return 'gemma2:2b'
+  return localStorage.getItem('ollama_model') || 'gemma2:2b'
+}
+
+// Load Ollama system prompt from localStorage
+const loadOllamaSystemPrompt = (): string => {
+  if (typeof window === 'undefined') return ''
+  return localStorage.getItem('ollama_system_prompt') || ''
+}
+
 // Load translation provider preference
 const loadTranslationProvider = (): 'google' | 'deepl-free' | 'deepl-pro' | 'ollama' => {
   if (typeof window === 'undefined') return 'google'
@@ -177,6 +189,8 @@ export const useEditorStore = create(
       textBlocks: [],
       translationApiKey: loadGoogleApiKey(),
       deeplApiKey: loadDeeplApiKey(),
+      ollamaModel: loadOllamaModel(),
+      ollamaSystemPrompt: loadOllamaSystemPrompt(),
       translationProvider: loadTranslationProvider(),
       segmentationMask: null,
       inpaintedImage: null,
@@ -201,6 +215,8 @@ export const useEditorStore = create(
       textBlocks: TextBlock[]
       translationApiKey: string | null
       deeplApiKey: string | null
+      ollamaModel: string
+      ollamaSystemPrompt: string
       translationProvider: 'google' | 'deepl-free' | 'deepl-pro' | 'ollama'
       segmentationMask: number[] | null
       inpaintedImage: Image | null
@@ -249,6 +265,18 @@ export const useEditorStore = create(
           localStorage.setItem('translation_provider', provider)
         }
         set({ translationProvider: provider })
+      },
+      setOllamaModel: (model: string) => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('ollama_model', model)
+        }
+        set({ ollamaModel: model })
+      },
+      setOllamaSystemPrompt: (prompt: string) => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('ollama_system_prompt', prompt)
+        }
+        set({ ollamaSystemPrompt: prompt })
       },
       setSegmentationMask: (mask: number[] | null) => set({ segmentationMask: mask }),
       setInpaintedImage: (image: Image | null) => set({ inpaintedImage: image }),

@@ -12,6 +12,8 @@ function TranslationPanel() {
     setTextBlocks,
     translationApiKey,
     deeplApiKey,
+    ollamaModel,
+    ollamaSystemPrompt,
     translationProvider,
   } = useEditorStore()
   const [loading, setLoading] = useState(false)
@@ -69,7 +71,11 @@ function TranslationPanel() {
           const translated = await translate(
             block.text,
             translationProvider,
-            currentApiKey
+            currentApiKey,
+            'ja',
+            'en',
+            ollamaModel,
+            ollamaSystemPrompt
           )
           updatedBlocks[i] = { ...block, translatedText: translated }
         } catch (err) {

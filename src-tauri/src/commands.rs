@@ -693,38 +693,55 @@ pub async fn translate_with_deepl(
 
 // Ollama Translation API types and command
 #[derive(Debug, Serialize, Deserialize)]
-struct OllamaRequest {
+struct OllamaChatMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OllamaChatRequest {
     model: String,
-    prompt: String,
+    messages: Vec<OllamaChatMessage>,
     stream: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct OllamaResponse {
-    model: String,
-    response: String,
-    done: bool,
+struct OllamaChatResponse {
+    message: OllamaChatMessage,
 }
 
 #[tauri::command]
 pub async fn translate_with_ollama(
     text: String,
-    model: Option<String>,
+    model: String,
+    system_prompt: Option<String>,
 ) -> CommandResult<String> {
-    let url = "http://localhost:11434/api/generate";
+    let url = "http://localhost:11434/api/chat";
 
-    // Default to a common model if not specified
-    let model_name = model.unwrap_or_else(|| "gemma2:2b".to_string());
+    // Build messages array
+    let mut messages = Vec::new();
 
-    // Pass the Japanese text directly without any query building
-    // The system prompt is already set in Ollama
-    let request_body = OllamaRequest {
-        model: model_name.clone(),
-        prompt: text.clone(),
+    // Add system prompt if provided
+    if let Some(prompt) = system_prompt {
+        if !prompt.trim().is_empty() {
+            messages.push(OllamaChatMessage {
+                role: "system".to_string(),
+                content: prompt,
+            });
+        }
+    }
+
+    // Add user message with the OCR'd text
+    messages.push(OllamaChatMessage {
+        role: "user".to_string(),
+        content: text,
+    });
+
+    let request_body = OllamaChatRequest {
+        model,
+        messages,
         stream: false,
     };
-
-    tracing::debug!("Ollama request: model={}, text_length={}", model_name, text.len());
 
     let client = reqwest::Client::new();
     let response = client
@@ -743,12 +760,10 @@ pub async fn translate_with_ollama(
         return Err(anyhow::anyhow!(error_msg).into());
     }
 
-    let ollama_response: OllamaResponse = response
+    let ollama_response: OllamaChatResponse = response
         .json()
         .await
         .context("Failed to parse Ollama API response")?;
 
-    tracing::debug!("Ollama response received: {} chars", ollama_response.response.len());
-
-    Ok(ollama_response.response)
+    Ok(ollama_response.message.content)
 }

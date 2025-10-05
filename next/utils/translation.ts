@@ -170,15 +170,17 @@ export async function translateWithDeepL(
 
 /**
  * Translate text using Ollama via Tauri backend
- * Passes the Japanese text directly - system prompt is set in Ollama
+ * Sends raw OCR text directly to Ollama endpoint
  *
  * @param text - Text to translate (raw Japanese OCR output)
- * @param model - Ollama model name (optional, defaults to gemma2:2b)
+ * @param model - Ollama model name
+ * @param systemPrompt - Optional system prompt (if empty, uses model's default)
  * @returns Translated text
  */
 export async function translateWithOllama(
   text: string,
-  model?: string
+  model: string,
+  systemPrompt?: string
 ): Promise<string> {
   if (!text || text.trim().length === 0) {
     return text
@@ -189,7 +191,8 @@ export async function translateWithOllama(
 
     const result = await invoke<string>('translate_with_ollama', {
       text,
-      model: model || null,
+      model,
+      systemPrompt: systemPrompt || null,
     })
 
     return result
@@ -217,6 +220,8 @@ export async function translateWithOllama(
  * @param apiKey - API key for the selected provider (not used for Ollama)
  * @param sourceLang - Source language code
  * @param targetLang - Target language code
+ * @param ollamaModel - Ollama model name (required for Ollama)
+ * @param ollamaSystemPrompt - Optional Ollama system prompt
  * @returns Translated text
  */
 export async function translate(
@@ -224,11 +229,16 @@ export async function translate(
   provider: TranslationProvider,
   apiKey: string,
   sourceLang = 'ja',
-  targetLang = 'en'
+  targetLang = 'en',
+  ollamaModel?: string,
+  ollamaSystemPrompt?: string
 ): Promise<string> {
   if (provider === 'ollama') {
-    // Ollama: Pass text directly, system prompt is already set
-    return translateWithOllama(text)
+    // Ollama: Pass text with model and optional system prompt
+    if (!ollamaModel) {
+      throw new Error('Ollama model name is required')
+    }
+    return translateWithOllama(text, ollamaModel, ollamaSystemPrompt)
   } else if (provider === 'deepl-free' || provider === 'deepl-pro') {
     // DeepL: Use EN-US as recommended by DeepL docs
     const usePro = provider === 'deepl-pro'
