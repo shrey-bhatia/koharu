@@ -183,61 +183,69 @@ export default function SettingsDialog() {
                           <span className='text-xs text-gray-500'>Paid plan with unlimited usage</span>
                         </div>
                       </Select.Item>
+                      <Select.Item value='ollama'>
+                        <div className='flex flex-col'>
+                          <span className='font-medium'>Ollama (Local LLM)</span>
+                          <span className='text-xs text-gray-500'>Runs locally via http://localhost:11434</span>
+                        </div>
+                      </Select.Item>
                     </Select.Content>
                   </Select.Root>
                 </label>
               </div>
 
-              {/* API Key Input - Conditional based on provider */}
-              <div className='space-y-2'>
-                <label>
-                  <Text as='div' size='2' mb='1' weight='bold'>
-                    {selectedProvider === 'google' ? 'Google Cloud API Key' : 'DeepL API Key'}
-                  </Text>
-                  <TextField.Root
-                    type='password'
-                    placeholder={
-                      selectedProvider === 'google'
-                        ? 'Enter your Google Cloud API key'
-                        : 'Enter your DeepL API key'
-                    }
-                    value={selectedProvider === 'google' ? googleApiKeyInput : deeplApiKeyInput}
-                    onChange={(e) => {
-                      if (selectedProvider === 'google') {
-                        setGoogleApiKeyInput(e.target.value)
-                      } else {
-                        setDeeplApiKeyInput(e.target.value)
+              {/* API Key Input - Conditional based on provider (hidden for Ollama) */}
+              {selectedProvider !== 'ollama' && (
+                <div className='space-y-2'>
+                  <label>
+                    <Text as='div' size='2' mb='1' weight='bold'>
+                      {selectedProvider === 'google' ? 'Google Cloud API Key' : 'DeepL API Key'}
+                    </Text>
+                    <TextField.Root
+                      type='password'
+                      placeholder={
+                        selectedProvider === 'google'
+                          ? 'Enter your Google Cloud API key'
+                          : 'Enter your DeepL API key'
                       }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        handleTest()
-                      }
-                    }}
-                  />
-                </label>
+                      value={selectedProvider === 'google' ? googleApiKeyInput : deeplApiKeyInput}
+                      onChange={(e) => {
+                        if (selectedProvider === 'google') {
+                          setGoogleApiKeyInput(e.target.value)
+                        } else {
+                          setDeeplApiKeyInput(e.target.value)
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleTest()
+                        }
+                      }}
+                    />
+                  </label>
 
-                <div className='flex gap-2'>
-                  <Button
-                    size='1'
-                    variant='soft'
-                    onClick={handleTest}
-                    disabled={
-                      testing ||
-                      (selectedProvider === 'google' ? !googleApiKeyInput : !deeplApiKeyInput)
-                    }
-                    loading={testing}
-                  >
-                    Test Connection
-                  </Button>
-                  {((selectedProvider === 'google' && googleApiKeyInput) ||
-                    ((selectedProvider === 'deepl-free' || selectedProvider === 'deepl-pro') && deeplApiKeyInput)) && (
-                    <Button size='1' variant='soft' color='red' onClick={handleClearCurrentProvider}>
-                      Clear
+                  <div className='flex gap-2'>
+                    <Button
+                      size='1'
+                      variant='soft'
+                      onClick={handleTest}
+                      disabled={
+                        testing ||
+                        (selectedProvider === 'google' ? !googleApiKeyInput : !deeplApiKeyInput)
+                      }
+                      loading={testing}
+                    >
+                      Test Connection
                     </Button>
-                  )}
+                    {((selectedProvider === 'google' && googleApiKeyInput) ||
+                      ((selectedProvider === 'deepl-free' || selectedProvider === 'deepl-pro') && deeplApiKeyInput)) && (
+                      <Button size='1' variant='soft' color='red' onClick={handleClearCurrentProvider}>
+                        Clear
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
 
           {/* Test result */}
           {testResult && (
@@ -285,7 +293,7 @@ export default function SettingsDialog() {
                         <strong>Important:</strong> Free API keys only work with the free endpoint (api-free.deepl.com).
                       </div>
                     </>
-                  ) : (
+                  ) : selectedProvider === 'deepl-pro' ? (
                     <>
                       <strong>How to get a DeepL Pro API key:</strong>
                       <ol className='ml-4 mt-2 list-decimal space-y-1'>
@@ -299,6 +307,22 @@ export default function SettingsDialog() {
                       </div>
                       <div className='mt-2 text-yellow-700 dark:text-yellow-500'>
                         <strong>Important:</strong> Pro API keys only work with the pro endpoint (api.deepl.com).
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <strong>Using Ollama for Local LLM Translation:</strong>
+                      <ol className='ml-4 mt-2 list-decimal space-y-1'>
+                        <li>Install Ollama from ollama.com</li>
+                        <li>Start Ollama (runs on http://localhost:11434 by default)</li>
+                        <li>Pull a model: <code className='rounded bg-gray-200 px-1 dark:bg-gray-800'>ollama pull gemma2:2b</code></li>
+                        <li>Set your translation system prompt in Ollama</li>
+                      </ol>
+                      <div className='mt-2'>
+                        <strong>Benefits:</strong> Free, unlimited, runs locally, no API key needed
+                      </div>
+                      <div className='mt-2 text-blue-700 dark:text-blue-500'>
+                        <strong>Note:</strong> The OCR'd Japanese text is passed directly to your model. Configure your system prompt in Ollama beforehand.
                       </div>
                     </>
                   )}

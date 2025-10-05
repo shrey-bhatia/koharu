@@ -1,10 +1,10 @@
 /**
  * Multi-provider Translation API wrapper
- * Supports Google Cloud Translation and DeepL (Free and Pro)
+ * Supports Google Cloud Translation, DeepL (Free and Pro), and Ollama
  * Uses REST API (no SDK needed) - works in browser/Tauri context
  */
 
-export type TranslationProvider = 'google' | 'deepl-free' | 'deepl-pro'
+export type TranslationProvider = 'google' | 'deepl-free' | 'deepl-pro' | 'ollama'
 
 export interface TranslationError {
   code: number
@@ -169,11 +169,52 @@ export async function translateWithDeepL(
 }
 
 /**
+ * Translate text using Ollama via Tauri backend
+ * Passes the Japanese text directly - system prompt is set in Ollama
+ *
+ * @param text - Text to translate (raw Japanese OCR output)
+ * @param model - Ollama model name (optional, defaults to gemma2:2b)
+ * @returns Translated text
+ */
+export async function translateWithOllama(
+  text: string,
+  model?: string
+): Promise<string> {
+  if (!text || text.trim().length === 0) {
+    return text
+  }
+
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+
+    const result = await invoke<string>('translate_with_ollama', {
+      text,
+      model: model || null,
+    })
+
+    return result
+  } catch (error) {
+    if (typeof error === 'string') {
+      if (error.includes('Failed to connect to Ollama')) {
+        throw new Error('Could not connect to Ollama. Make sure Ollama is running on http://localhost:11434')
+      }
+      throw new Error(`Ollama translation failed: ${error}`)
+    }
+
+    if (error instanceof Error) {
+      throw new Error(`Translation failed: ${error.message}`)
+    }
+
+    throw new Error('Unknown translation error')
+  }
+}
+
+/**
  * Unified translation function that routes to the correct provider
  *
  * @param text - Text to translate
- * @param provider - Translation provider ('google', 'deepl-free', or 'deepl-pro')
- * @param apiKey - API key for the selected provider
+ * @param provider - Translation provider ('google', 'deepl-free', 'deepl-pro', or 'ollama')
+ * @param apiKey - API key for the selected provider (not used for Ollama)
  * @param sourceLang - Source language code
  * @param targetLang - Target language code
  * @returns Translated text
@@ -185,7 +226,10 @@ export async function translate(
   sourceLang = 'ja',
   targetLang = 'en'
 ): Promise<string> {
-  if (provider === 'deepl-free' || provider === 'deepl-pro') {
+  if (provider === 'ollama') {
+    // Ollama: Pass text directly, system prompt is already set
+    return translateWithOllama(text)
+  } else if (provider === 'deepl-free' || provider === 'deepl-pro') {
     // DeepL: Use EN-US as recommended by DeepL docs
     const usePro = provider === 'deepl-pro'
     const deeplTarget = targetLang.toLowerCase() === 'en' ? 'EN-US' : targetLang.toUpperCase()

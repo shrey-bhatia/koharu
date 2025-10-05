@@ -690,3 +690,65 @@ pub async fn translate_with_deepl(
         .map(|t| t.text.clone())
         .ok_or_else(|| anyhow::anyhow!("DeepL returned no translations").into())
 }
+
+// Ollama Translation API types and command
+#[derive(Debug, Serialize, Deserialize)]
+struct OllamaRequest {
+    model: String,
+    prompt: String,
+    stream: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OllamaResponse {
+    model: String,
+    response: String,
+    done: bool,
+}
+
+#[tauri::command]
+pub async fn translate_with_ollama(
+    text: String,
+    model: Option<String>,
+) -> CommandResult<String> {
+    let url = "http://localhost:11434/api/generate";
+
+    // Default to a common model if not specified
+    let model_name = model.unwrap_or_else(|| "gemma2:2b".to_string());
+
+    // Pass the Japanese text directly without any query building
+    // The system prompt is already set in Ollama
+    let request_body = OllamaRequest {
+        model: model_name.clone(),
+        prompt: text.clone(),
+        stream: false,
+    };
+
+    tracing::debug!("Ollama request: model={}, text_length={}", model_name, text.len());
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .json(&request_body)
+        .send()
+        .await
+        .context("Failed to connect to Ollama. Make sure Ollama is running on http://localhost:11434")?;
+
+    let status = response.status();
+
+    if !status.is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_msg = format!("Ollama API error ({}): {}", status.as_u16(), error_text);
+        return Err(anyhow::anyhow!(error_msg).into());
+    }
+
+    let ollama_response: OllamaResponse = response
+        .json()
+        .await
+        .context("Failed to parse Ollama API response")?;
+
+    tracing::debug!("Ollama response received: {} chars", ollama_response.response.len());
+
+    Ok(ollama_response.response)
+}

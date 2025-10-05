@@ -22,11 +22,15 @@ function TranslationPanel() {
   const autosaveTimeout = useRef<NodeJS.Timeout | null>(null)
 
   const runTranslation = async () => {
-    // Get the appropriate API key based on selected provider
-    const currentApiKey = translationProvider === 'google' ? translationApiKey : deeplApiKey
+    // Get the appropriate API key based on selected provider (Ollama doesn't need one)
+    const currentApiKey = translationProvider === 'google'
+      ? translationApiKey
+      : translationProvider === 'ollama'
+      ? 'not-needed' // Ollama doesn't require API key
+      : deeplApiKey
 
-    // Check for API key
-    if (!currentApiKey) {
+    // Check for API key (skip for Ollama)
+    if (!currentApiKey && translationProvider !== 'ollama') {
       const providerName = translationProvider === 'google'
         ? 'Google Cloud Translation'
         : translationProvider === 'deepl-free'
@@ -142,8 +146,12 @@ function TranslationPanel() {
     }
   }, [])
 
-  // Determine if translation is available (has API key for current provider)
-  const currentApiKey = translationProvider === 'google' ? translationApiKey : deeplApiKey
+  // Determine if translation is available (has API key for current provider, or is Ollama)
+  const currentApiKey = translationProvider === 'google'
+    ? translationApiKey
+    : translationProvider === 'ollama'
+    ? true // Ollama doesn't need API key
+    : deeplApiKey
   const canTranslate = !!currentApiKey
 
   return (
