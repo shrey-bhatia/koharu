@@ -10,6 +10,7 @@ import TranslationPanel from '@/components/translation-panel'
 import InpaintPanel from '@/components/inpaint-panel'
 import InpaintSettings from '@/components/inpaint-settings'
 import RenderPanel from '@/components/render-panel'
+import BatchPanel from '@/components/batch-panel'
 import { useEditorStore } from '@/lib/state'
 
 function App() {
@@ -49,6 +50,7 @@ function App() {
             </>
           )}
           {selectedTool === 'render' && <RenderPanel />}
+          {selectedTool === 'batch' && <BatchPanel />}
         </div>
       </div>
     </main>

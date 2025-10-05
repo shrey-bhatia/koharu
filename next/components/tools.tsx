@@ -2,6 +2,7 @@
 
 import {
   Languages,
+  ListChecks,
   MessageCircle,
   PaintbrushVertical,
   SquareDashedMousePointer,
@@ -38,6 +39,11 @@ function Tools() {
       id: 'render',
       icon: Type,
       description: 'Render translated text',
+    },
+    {
+      id: 'batch',
+      icon: ListChecks,
+      description: 'Batch process multiple pages',
     },
   ]
 
