@@ -203,7 +203,11 @@ export default function InpaintPanel() {
           segmentationMask!,
           image!.bitmap.width,
           image!.bitmap.height,
-          inpaintingConfig.featherRadius
+          {
+            featherRadius: inpaintingConfig.featherRadius,
+            autoSeamFix: inpaintingConfig.autoSeamFix,
+            seamThreshold: inpaintingConfig.seamThreshold,
+          }
         )
 
         setProgress((i + 1) / textBlocks.length)

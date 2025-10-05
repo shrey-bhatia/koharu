@@ -22,7 +22,7 @@ interface GpuStatus {
 }
 
 export default function RenderPanel() {
-  const { image, textBlocks, setTextBlocks, renderMethod, setRenderMethod, inpaintedImage, setPipelineStage, setCurrentStage, defaultFont } = useEditorStore()
+  const { image, textBlocks, setTextBlocks, renderMethod, setRenderMethod, inpaintedImage, setPipelineStage, setCurrentStage, defaultFont, setTool } = useEditorStore()
   const [processing, setProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -159,7 +159,12 @@ export default function RenderPanel() {
       }
 
       setTextBlocks(updated)
-      console.log('Color processing complete!')
+
+      // Switch to render tool and 'final' stage to show live preview with rendered text
+      setTool('render')
+      setCurrentStage('final')
+
+      console.log('Color processing complete! Switched to render preview.')
     } catch (err) {
       console.error('Color processing error:', err)
       setError(err instanceof Error ? err.message : 'Failed to process colors')

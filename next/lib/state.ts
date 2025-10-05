@@ -126,10 +126,22 @@ export type TextBlock = {
   appearanceAnalyzed?: boolean
 }
 
-// Load API key from localStorage (browser/Tauri context)
-const loadApiKey = (): string | null => {
+// Load Google API key from localStorage (browser/Tauri context)
+const loadGoogleApiKey = (): string | null => {
   if (typeof window === 'undefined') return null
   return localStorage.getItem('google_translate_api_key')
+}
+
+// Load DeepL API key from localStorage
+const loadDeeplApiKey = (): string | null => {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem('deepl_translate_api_key')
+}
+
+// Load translation provider preference
+const loadTranslationProvider = (): 'google' | 'deepl' => {
+  if (typeof window === 'undefined') return 'google'
+  return (localStorage.getItem('translation_provider') as 'google' | 'deepl') || 'google'
 }
 
 // Load theme preference
@@ -163,7 +175,9 @@ export const useEditorStore = create(
       tool: 'detection',
       scale: 1,
       textBlocks: [],
-      translationApiKey: loadApiKey(),
+      translationApiKey: loadGoogleApiKey(),
+      deeplApiKey: loadDeeplApiKey(),
+      translationProvider: loadTranslationProvider(),
       segmentationMask: null,
       inpaintedImage: null,
       theme: loadTheme(),
@@ -186,6 +200,8 @@ export const useEditorStore = create(
       scale: number
       textBlocks: TextBlock[]
       translationApiKey: string | null
+      deeplApiKey: string | null
+      translationProvider: 'google' | 'deepl'
       segmentationMask: number[] | null
       inpaintedImage: Image | null
       theme: 'light' | 'dark'
@@ -217,6 +233,22 @@ export const useEditorStore = create(
           }
         }
         set({ translationApiKey: key })
+      },
+      setDeeplApiKey: (key: string | null) => {
+        if (typeof window !== 'undefined') {
+          if (key) {
+            localStorage.setItem('deepl_translate_api_key', key)
+          } else {
+            localStorage.removeItem('deepl_translate_api_key')
+          }
+        }
+        set({ deeplApiKey: key })
+      },
+      setTranslationProvider: (provider: 'google' | 'deepl') => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('translation_provider', provider)
+        }
+        set({ translationProvider: provider })
       },
       setSegmentationMask: (mask: number[] | null) => set({ segmentationMask: mask }),
       setInpaintedImage: (image: Image | null) => set({ inpaintedImage: image }),

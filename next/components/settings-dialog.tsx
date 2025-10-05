@@ -4,14 +4,27 @@ import { useState, useEffect } from 'react'
 import { Dialog, Button, TextField, Text, Callout, Select, Tabs } from '@radix-ui/themes'
 import { Settings, CheckCircle, XCircle } from 'lucide-react'
 import { useEditorStore } from '@/lib/state'
-import { testApiKey } from '@/utils/translation'
+import { testApiKey, TranslationProvider } from '@/utils/translation'
 import { invoke } from '@tauri-apps/api/core'
 import GpuStatusPanel from './gpu-status-panel'
 
 export default function SettingsDialog() {
-  const { translationApiKey, setTranslationApiKey, gpuPreference, setGpuPreference, defaultFont, setDefaultFont } = useEditorStore()
+  const {
+    translationApiKey,
+    setTranslationApiKey,
+    deeplApiKey,
+    setDeeplApiKey,
+    translationProvider,
+    setTranslationProvider,
+    gpuPreference,
+    setGpuPreference,
+    defaultFont,
+    setDefaultFont
+  } = useEditorStore()
   const [open, setOpen] = useState(false)
-  const [apiKeyInput, setApiKeyInput] = useState(translationApiKey || '')
+  const [googleApiKeyInput, setGoogleApiKeyInput] = useState(translationApiKey || '')
+  const [deeplApiKeyInput, setDeeplApiKeyInput] = useState(deeplApiKey || '')
+  const [selectedProvider, setSelectedProvider] = useState<TranslationProvider>(translationProvider)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null)
   const [testMessage, setTestMessage] = useState('')
@@ -20,7 +33,9 @@ export default function SettingsDialog() {
   const [loadingFonts, setLoadingFonts] = useState(true)
 
   const handleTest = async () => {
-    if (!apiKeyInput || apiKeyInput.trim().length === 0) {
+    const currentApiKey = selectedProvider === 'google' ? googleApiKeyInput : deeplApiKeyInput
+
+    if (!currentApiKey || currentApiKey.trim().length === 0) {
       setTestResult('error')
       setTestMessage('Please enter an API key first')
       return
@@ -31,7 +46,7 @@ export default function SettingsDialog() {
     setTestMessage('')
 
     try {
-      const isValid = await testApiKey(apiKeyInput.trim())
+      const isValid = await testApiKey(currentApiKey.trim(), selectedProvider)
       if (isValid) {
         setTestResult('success')
         setTestMessage('API key is valid! ✓')
@@ -48,23 +63,33 @@ export default function SettingsDialog() {
   }
 
   const handleSave = () => {
-    const trimmedKey = apiKeyInput.trim()
-    setTranslationApiKey(trimmedKey || null)
+    const trimmedGoogleKey = googleApiKeyInput.trim()
+    const trimmedDeeplKey = deeplApiKeyInput.trim()
+
+    setTranslationApiKey(trimmedGoogleKey || null)
+    setDeeplApiKey(trimmedDeeplKey || null)
+    setTranslationProvider(selectedProvider)
+
     setOpen(false)
     setTestResult(null)
     setTestMessage('')
   }
 
   const handleCancel = () => {
-    setApiKeyInput(translationApiKey || '')
+    setGoogleApiKeyInput(translationApiKey || '')
+    setDeeplApiKeyInput(deeplApiKey || '')
+    setSelectedProvider(translationProvider)
     setOpen(false)
     setTestResult(null)
     setTestMessage('')
   }
 
-  const handleClear = () => {
-    setApiKeyInput('')
-    setTranslationApiKey(null)
+  const handleClearCurrentProvider = () => {
+    if (selectedProvider === 'google') {
+      setGoogleApiKeyInput('')
+    } else {
+      setDeeplApiKeyInput('')
+    }
     setTestResult(null)
     setTestMessage('')
   }
@@ -124,41 +149,89 @@ export default function SettingsDialog() {
           {/* Translation Tab */}
           <Tabs.Content value='translation'>
             <div className='mt-4 space-y-4'>
-          <div className='space-y-2'>
-            <label>
-              <Text as='div' size='2' mb='1' weight='bold'>
-                API Key
-              </Text>
-              <TextField.Root
-                type='password'
-                placeholder='Enter your Google Cloud API key'
-                value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleTest()
-                  }
-                }}
-              />
-            </label>
+              {/* Provider Selection */}
+              <div className='space-y-2'>
+                <label>
+                  <Text as='div' size='2' mb='1' weight='bold'>
+                    Translation Provider
+                  </Text>
+                  <Select.Root
+                    value={selectedProvider}
+                    onValueChange={(value: TranslationProvider) => {
+                      setSelectedProvider(value)
+                      setTestResult(null)
+                      setTestMessage('')
+                    }}
+                  >
+                    <Select.Trigger className='w-full' />
+                    <Select.Content>
+                      <Select.Item value='google'>
+                        <div className='flex flex-col'>
+                          <span className='font-medium'>Google Cloud Translation</span>
+                          <span className='text-xs text-gray-500'>500,000 characters/month free</span>
+                        </div>
+                      </Select.Item>
+                      <Select.Item value='deepl'>
+                        <div className='flex flex-col'>
+                          <span className='font-medium'>DeepL</span>
+                          <span className='text-xs text-gray-500'>500,000 characters/month free</span>
+                        </div>
+                      </Select.Item>
+                    </Select.Content>
+                  </Select.Root>
+                </label>
+              </div>
 
-            <div className='flex gap-2'>
-              <Button
-                size='1'
-                variant='soft'
-                onClick={handleTest}
-                disabled={testing || !apiKeyInput}
-                loading={testing}
-              >
-                Test Connection
-              </Button>
-              {apiKeyInput && (
-                <Button size='1' variant='soft' color='red' onClick={handleClear}>
-                  Clear
-                </Button>
-              )}
-            </div>
-          </div>
+              {/* API Key Input - Conditional based on provider */}
+              <div className='space-y-2'>
+                <label>
+                  <Text as='div' size='2' mb='1' weight='bold'>
+                    {selectedProvider === 'google' ? 'Google Cloud API Key' : 'DeepL API Key'}
+                  </Text>
+                  <TextField.Root
+                    type='password'
+                    placeholder={
+                      selectedProvider === 'google'
+                        ? 'Enter your Google Cloud API key'
+                        : 'Enter your DeepL API key'
+                    }
+                    value={selectedProvider === 'google' ? googleApiKeyInput : deeplApiKeyInput}
+                    onChange={(e) => {
+                      if (selectedProvider === 'google') {
+                        setGoogleApiKeyInput(e.target.value)
+                      } else {
+                        setDeeplApiKeyInput(e.target.value)
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleTest()
+                      }
+                    }}
+                  />
+                </label>
+
+                <div className='flex gap-2'>
+                  <Button
+                    size='1'
+                    variant='soft'
+                    onClick={handleTest}
+                    disabled={
+                      testing ||
+                      (selectedProvider === 'google' ? !googleApiKeyInput : !deeplApiKeyInput)
+                    }
+                    loading={testing}
+                  >
+                    Test Connection
+                  </Button>
+                  {((selectedProvider === 'google' && googleApiKeyInput) ||
+                    (selectedProvider === 'deepl' && deeplApiKeyInput)) && (
+                    <Button size='1' variant='soft' color='red' onClick={handleClearCurrentProvider}>
+                      Clear
+                    </Button>
+                  )}
+                </div>
+              </div>
 
           {/* Test result */}
           {testResult && (
@@ -174,27 +247,48 @@ export default function SettingsDialog() {
             </Callout.Root>
           )}
 
-          {/* Instructions */}
-          <div className='rounded border border-gray-200 bg-gray-50 p-3'>
-            <Text size='1' className='text-gray-700'>
-              <strong>How to get an API key:</strong>
-              <ol className='ml-4 mt-2 list-decimal space-y-1'>
-                <li>Go to Google Cloud Console</li>
-                <li>Enable Cloud Translation API</li>
-                <li>Create credentials → API Key</li>
-                <li>Copy and paste the key above</li>
-              </ol>
-              <div className='mt-2'>
-                <strong>Free tier:</strong> 500,000 characters/month
+              {/* Instructions - Conditional based on provider */}
+              <div className='rounded border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900'>
+                <Text size='1' className='text-gray-700 dark:text-gray-300'>
+                  {selectedProvider === 'google' ? (
+                    <>
+                      <strong>How to get a Google Cloud API key:</strong>
+                      <ol className='ml-4 mt-2 list-decimal space-y-1'>
+                        <li>Go to Google Cloud Console</li>
+                        <li>Enable Cloud Translation API</li>
+                        <li>Create credentials → API Key</li>
+                        <li>Copy and paste the key above</li>
+                      </ol>
+                      <div className='mt-2'>
+                        <strong>Free tier:</strong> 500,000 characters/month
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <strong>How to get a DeepL API key:</strong>
+                      <ol className='ml-4 mt-2 list-decimal space-y-1'>
+                        <li>Go to DeepL API website (deepl.com/pro-api)</li>
+                        <li>Sign up for DeepL API Free plan</li>
+                        <li>Find your API key in the account settings</li>
+                        <li>Copy and paste the key above</li>
+                      </ol>
+                      <div className='mt-2'>
+                        <strong>Free tier:</strong> 500,000 characters/month
+                      </div>
+                      <div className='mt-2 text-yellow-700 dark:text-yellow-500'>
+                        <strong>Note:</strong> Use the Free API endpoint (api-free.deepl.com). Pro keys
+                        won't work with the free endpoint.
+                      </div>
+                    </>
+                  )}
+                </Text>
               </div>
-            </Text>
-          </div>
 
               {/* Security notice */}
               <Callout.Root size='1'>
                 <Callout.Text>
-                  <strong>Note:</strong> Your API key is stored locally in your browser and never sent
-                  anywhere except Google Translation API.
+                  <strong>Note:</strong> Your API keys are stored locally and only sent to their
+                  respective translation services. Keys are never shared between providers.
                 </Callout.Text>
               </Callout.Root>
             </div>

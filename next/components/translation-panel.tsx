@@ -4,10 +4,16 @@ import { Badge, Button, Text, TextArea, Callout } from '@radix-ui/themes'
 import { Play, AlertCircle } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { useEditorStore } from '@/lib/state'
-import { translateWithGoogle, TranslationAPIError } from '@/utils/translation'
+import { translate, TranslationAPIError } from '@/utils/translation'
 
 function TranslationPanel() {
-  const { textBlocks, setTextBlocks, translationApiKey } = useEditorStore()
+  const {
+    textBlocks,
+    setTextBlocks,
+    translationApiKey,
+    deeplApiKey,
+    translationProvider,
+  } = useEditorStore()
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
@@ -15,10 +21,14 @@ function TranslationPanel() {
   const [editValue, setEditValue] = useState('')
   const autosaveTimeout = useRef<NodeJS.Timeout | null>(null)
 
-  const translate = async () => {
+  const runTranslation = async () => {
+    // Get the appropriate API key based on selected provider
+    const currentApiKey = translationProvider === 'google' ? translationApiKey : deeplApiKey
+
     // Check for API key
-    if (!translationApiKey) {
-      setError('API key not set. Click the settings icon in the top bar to add your Google Cloud Translation API key.')
+    if (!currentApiKey) {
+      const providerName = translationProvider === 'google' ? 'Google Cloud Translation' : 'DeepL'
+      setError(`API key not set. Click the settings icon in the top bar to add your ${providerName} API key.`)
       return
     }
 
@@ -48,9 +58,10 @@ function TranslationPanel() {
         setProgress(`Translating block ${i + 1}/${textBlocks.length}...`)
 
         try {
-          const translated = await translateWithGoogle(
+          const translated = await translate(
             block.text,
-            translationApiKey
+            translationProvider,
+            currentApiKey
           )
           updatedBlocks[i] = { ...block, translatedText: translated }
         } catch (err) {
@@ -127,13 +138,17 @@ function TranslationPanel() {
     }
   }, [])
 
+  // Determine if translation is available (has API key for current provider)
+  const currentApiKey = translationProvider === 'google' ? translationApiKey : deeplApiKey
+  const canTranslate = !!currentApiKey
+
   return (
     <div className='flex max-h-[800px] w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md dark:border-gray-700 dark:bg-gray-800'>
       {/* Header */}
       <div className='flex items-center p-3'>
         <h2 className='font-medium dark:text-white'>Translation</h2>
         <div className='flex-grow'></div>
-        <Button onClick={translate} loading={loading} variant='soft' disabled={!translationApiKey}>
+        <Button onClick={runTranslation} loading={loading} variant='soft' disabled={!canTranslate}>
           <Play className='h-4 w-4' />
         </Button>
       </div>
