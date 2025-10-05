@@ -10,5 +10,8 @@
   },
   "workspaces": [
     "next"
-  ]
+  ],
+  "dependencies": {
+    "@tauri-apps/plugin-shell": "~2"
+  }
 }

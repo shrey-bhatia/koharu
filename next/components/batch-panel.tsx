@@ -27,8 +27,7 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { useBatchStore } from '@/lib/batch-state'
-import { open as openDialog } from '@tauri-apps/api/dialog'
-import { open as openPath } from '@tauri-apps/api/shell'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import type { BatchPage } from '@/lib/batch-types'
 
 const statusColors: Record<string, 'gray' | 'green' | 'red' | 'orange' | 'amber' | 'blue'> = {
@@ -85,6 +84,17 @@ const isTauriEnvironment = () => {
 }
 
 const getPercent = (value: number) => Math.min(100, Math.max(0, Math.round(value * 100)))
+
+let shellModulePromise: Promise<typeof import('@tauri-apps/plugin-shell')> | null = null
+
+const loadShellOpen = async () => {
+  if (!shellModulePromise) {
+    shellModulePromise = import('@tauri-apps/plugin-shell')
+  }
+
+  const shellModule = await shellModulePromise
+  return shellModule.open
+}
 
 function BatchPanel() {
   const pages = useBatchStore((state) => state.pages)
@@ -238,7 +248,8 @@ function BatchPanel() {
     }
 
     try {
-      await openPath(target)
+      const openShell = await loadShellOpen()
+      await openShell(target)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to open output'
       markError(message)

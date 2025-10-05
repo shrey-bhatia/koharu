@@ -278,7 +278,7 @@ export const useEditorStore = create(
       inpaintingPreset: 'fast' | 'balanced' | 'quality' | 'custom'
       defaultFont: string
     },
-    (set) => ({
+    (set, get) => ({
       loadImageSession: (image: Image | null) =>
         set(() => {
           const nextPipeline: PipelineStages = {
@@ -314,7 +314,10 @@ export const useEditorStore = create(
             scale: 1,
           }
         }),
-      setTool: (tool: string) => set({ tool }),
+      setTool: (tool: string) => {
+        if (get().tool === tool) return
+        set({ tool })
+      },
       setScale: (scale: number) => set({ scale }),
       setTextBlocks: (textBlocks: TextBlock[]) => set({ textBlocks }),
       setTranslationApiKey: (key: string | null) => {
@@ -338,18 +341,21 @@ export const useEditorStore = create(
         set({ deeplApiKey: key })
       },
       setTranslationProvider: (provider: 'google' | 'deepl-free' | 'deepl-pro' | 'ollama') => {
+        if (get().translationProvider === provider) return
         if (typeof window !== 'undefined') {
           localStorage.setItem('translation_provider', provider)
         }
         set({ translationProvider: provider })
       },
       setOllamaModel: (model: string) => {
+        if (get().ollamaModel === model) return
         if (typeof window !== 'undefined') {
           localStorage.setItem('ollama_model', model)
         }
         set({ ollamaModel: model })
       },
       setOllamaSystemPrompt: (prompt: string) => {
+        if (get().ollamaSystemPrompt === prompt) return
         if (typeof window !== 'undefined') {
           localStorage.setItem('ollama_system_prompt', prompt)
         }
@@ -358,6 +364,7 @@ export const useEditorStore = create(
       setSegmentationMask: (mask: number[] | null) => set({ segmentationMask: mask }),
       setInpaintedImage: (image: Image | null) => set({ inpaintedImage: image }),
       setTheme: (theme: 'light' | 'dark') => {
+        if (get().theme === theme) return
         if (typeof window !== 'undefined') {
           localStorage.setItem('theme', theme)
           document.documentElement.classList.toggle('dark', theme === 'dark')
@@ -365,6 +372,7 @@ export const useEditorStore = create(
         set({ theme })
       },
       setRenderMethod: (method: 'rectangle' | 'lama' | 'newlama') => {
+        if (get().renderMethod === method) return
         if (typeof window !== 'undefined') {
           localStorage.setItem('render_method', method)
         }
@@ -389,19 +397,19 @@ export const useEditorStore = create(
       },
       setSelectedBlockIndex: (index: number | null) => set({ selectedBlockIndex: index }),
       setGpuPreference: (pref: 'cuda' | 'directml' | 'cpu') => {
+        if (get().gpuPreference === pref) return
         if (typeof window !== 'undefined') {
           localStorage.setItem('gpu_preference', pref)
         }
         set({ gpuPreference: pref })
       },
-      setCurrentStage: (stage: PipelineStage) =>
-        set((state) => {
-          const status = deriveStageStatus(state, stage)
-          if (!status.isSelectable) {
-            return {}
-          }
-          return { currentStage: stage }
-        }),
+      setCurrentStage: (stage: PipelineStage) => {
+        const state = get()
+        if (state.currentStage === stage) return
+        const status = deriveStageStatus(state, stage)
+        if (!status.isSelectable) return
+        set({ currentStage: stage })
+      },
       setPipelineStage: (stage: PipelineStage, image: Image | null) =>
         set((state) => ({
           pipelineStages: { ...state.pipelineStages, [stage]: image },
@@ -417,6 +425,7 @@ export const useEditorStore = create(
           inpaintingPreset: 'custom', // Mark as custom when user tweaks
         })),
       setDefaultFont: (font: string) => {
+        if (get().defaultFont === font) return
         if (typeof window !== 'undefined') {
           localStorage.setItem('default_font', font)
         }

@@ -1,4 +1,3 @@
-import { readBinaryFile, writeBinaryFile, writeTextFile, createDir } from '@tauri-apps/api/fs'
 import { basename, extname, join } from '@tauri-apps/api/path'
 import { invoke } from '@tauri-apps/api/core'
 import type { BatchStore } from './batch-state'
@@ -22,6 +21,21 @@ import { calculateImprovedFontSize } from '@/utils/improved-font-sizing'
 import { compositeMaskedRegion } from '@/utils/alpha-compositing'
 import { createImageFromBlob, createImageFromBuffer, type Image } from './image'
 import type { InpaintingConfig } from './state'
+
+type FsModule = typeof import('@tauri-apps/plugin-fs')
+
+let fsModulePromise: Promise<FsModule> | null = null
+
+const loadFsModule = async (): Promise<FsModule> => {
+  if (!fsModulePromise) {
+    fsModulePromise = import('@tauri-apps/plugin-fs').catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Failed to load Tauri file system plugin: ${message}`)
+    })
+  }
+
+  return fsModulePromise
+}
 
 interface DetectionResult {
   bboxes: TextBlock[]
@@ -235,7 +249,8 @@ export class BatchRunner {
 
     try {
       const { image, imageBuffer } = await this.stageWrapper(page.id, 'loading', async () => {
-        const raw = await readBinaryFile(page.sourcePath)
+        const { readFile } = await loadFsModule()
+        const raw = await readFile(page.sourcePath)
         const arrayBuffer = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength)
         const blob = new Blob([raw])
         const image = await createImageFromBlob(blob)
@@ -674,23 +689,25 @@ export class BatchRunner {
     const outputDir = state.outputDir
     if (!outputDir) throw new Error('Output directory not selected')
 
-    await createDir(outputDir, { recursive: true })
+    const { mkdir, writeFile, writeTextFile } = await loadFsModule()
+
+    await mkdir(outputDir, { recursive: true })
 
     const originalName = await basename(page.fileName)
-  const baseName = originalName.replace(/\.[^/.]+$/, '')
-  const originalExtension = await extname(page.fileName)
-  const extension = '.png'
+    const baseName = originalName.replace(/\.[^/.]+$/, '')
+    const originalExtension = await extname(page.fileName)
+    const extension = '.png'
     const indexPrefix = String(index + 1).padStart(3, '0')
 
     const outputFileName = `${indexPrefix}-${baseName}${extension}`
     const outputImagePath = await join(outputDir, outputFileName)
-    await writeBinaryFile({ path: outputImagePath, contents: new Uint8Array(artifacts.finalBuffer) })
+    await writeFile(outputImagePath, new Uint8Array(artifacts.finalBuffer))
 
     let rectanglesPath: string | null = null
     if (config.renderMethod === 'rectangle' && artifacts.rectanglesBuffer) {
       const rectanglesName = `${indexPrefix}-${baseName}-rectangles${extension}`
       rectanglesPath = await join(outputDir, rectanglesName)
-      await writeBinaryFile({ path: rectanglesPath, contents: new Uint8Array(artifacts.rectanglesBuffer) })
+      await writeFile(rectanglesPath, new Uint8Array(artifacts.rectanglesBuffer))
     }
 
     const manifest = {
@@ -698,7 +715,7 @@ export class BatchRunner {
       fileName: page.fileName,
       createdAt: new Date().toISOString(),
       renderMethod: config.renderMethod,
-  originalExtension: originalExtension || null,
+      originalExtension: originalExtension || null,
       outputImage: outputFileName,
       outputPath: outputImagePath,
       rectanglesPath,

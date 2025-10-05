@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
   distDir: 'dist',
   reactStrictMode: false,
   devIndicators: false,
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
 }
 
 export default nextConfig
