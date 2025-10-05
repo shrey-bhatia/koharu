@@ -437,6 +437,15 @@ export default function RenderPanel() {
           </Callout.Root>
         )}
 
+        {/* AI Mode Info */}
+        {renderMethod !== 'rectangle' && (
+          <Callout.Root color='gray' size='1'>
+            <Callout.Text>
+              AI modes render directly on the clean plate—rectangle overlays are hidden by design.
+            </Callout.Text>
+          </Callout.Root>
+        )}
+
         {/* Status */}
         <div className='flex flex-col gap-1 text-sm'>
           <div className='flex items-center justify-between'>

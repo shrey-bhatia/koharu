@@ -280,7 +280,7 @@ export const useEditorStore = create(
     },
     (set) => ({
       loadImageSession: (image: Image | null) =>
-        set((state) => {
+        set(() => {
           const nextPipeline: PipelineStages = {
             original: image,
             textless: null,
@@ -426,45 +426,66 @@ export const useEditorStore = create(
   )
 )
 
-  export const getStageStatus = (stage: PipelineStage): StageStatus =>
-    deriveStageStatus(useEditorStore.getState(), stage)
+export type EditorState = ReturnType<typeof useEditorStore.getState>
 
-  export const getActiveBaseImage = (stageOverride?: PipelineStage): Image | null => {
-    const state = useEditorStore.getState()
-    const primaryStage = stageOverride ?? state.currentStage
-    const order: PipelineStage[] = []
-    const push = (value: PipelineStage) => {
-      if (!order.includes(value)) {
-        order.push(value)
-      }
+type StagefulState = Pick<EditorState, 'renderMethod' | 'pipelineStages' | 'currentStage' | 'image'>
+
+const deriveStageOrder = (
+  state: StagefulState,
+  stageOverride?: PipelineStage
+): PipelineStage[] => {
+  const primaryStage = stageOverride ?? state.currentStage
+  const order: PipelineStage[] = []
+  const push = (value: PipelineStage) => {
+    if (!order.includes(value)) {
+      order.push(value)
     }
-
-    push(primaryStage)
-
-    if (state.renderMethod === 'rectangle') {
-      push('final')
-      push('rectangles')
-      push('textless')
-    } else {
-      push('final')
-      push('textless')
-    }
-    push('original')
-
-    for (const candidate of order) {
-      const status = deriveStageStatus(state, candidate)
-      if (!status.isVisible) {
-        continue
-      }
-      if (status.image) {
-        return status.image
-      }
-    }
-
-    return state.image
   }
 
-  export const getAllStageStatuses = (): StageStatus[] =>
-    (['original', 'textless', 'rectangles', 'final'] as PipelineStage[]).map((stage) =>
-      getStageStatus(stage)
-    )
+  push(primaryStage)
+  if (state.renderMethod === 'rectangle') {
+    push('final')
+    push('rectangles')
+    push('textless')
+  } else {
+    push('final')
+    push('textless')
+  }
+  push('original')
+
+  return order
+}
+
+export const deriveActiveBaseImage = (
+  state: StagefulState,
+  stageOverride?: PipelineStage
+): Image | null => {
+  const order = deriveStageOrder(state, stageOverride)
+
+  for (const candidate of order) {
+    const status = deriveStageStatus(state, candidate)
+    if (!status.isVisible) continue
+    if (status.image) return status.image
+  }
+
+  return state.image
+}
+
+export const getStageStatus = (stage: PipelineStage): StageStatus =>
+  deriveStageStatus(useEditorStore.getState(), stage)
+
+export const getActiveBaseImage = (stageOverride?: PipelineStage): Image | null =>
+  deriveActiveBaseImage(useEditorStore.getState(), stageOverride)
+
+export const getAllStageStatuses = (): StageStatus[] =>
+  (['original', 'textless', 'rectangles', 'final'] as PipelineStage[]).map((stage) =>
+    getStageStatus(stage)
+  )
+
+export const selectActiveBaseImage = (stageOverride?: PipelineStage) =>
+  (state: EditorState) => deriveActiveBaseImage(state, stageOverride)
+
+export const selectStageStatuses = (state: EditorState): StageStatus[] =>
+  (['original', 'textless', 'rectangles', 'final'] as PipelineStage[])
+    .map((stage) => deriveStageStatus(state, stage))
+    .filter((status) => status.isVisible)

@@ -3,7 +3,7 @@
 import { Image, Moon, Sun } from 'lucide-react'
 import { Button, IconButton, Badge } from '@radix-ui/themes'
 import { fileOpen } from 'browser-fs-access'
-import { useEditorStore, deriveStageStatus, PipelineStage } from '@/lib/state'
+import { useEditorStore, PipelineStage, selectStageStatuses } from '@/lib/state'
 import { createImageFromBlob } from '@/lib/image'
 import SettingsDialog from './settings-dialog'
 import DetectionControls from './detection-controls'
@@ -15,11 +15,7 @@ function Topbar() {
   const tool = useEditorStore((state) => state.tool)
   const currentStage = useEditorStore((state) => state.currentStage)
   const setCurrentStage = useEditorStore((state) => state.setCurrentStage)
-  const stageStatuses = useEditorStore((state) =>
-    (['original', 'textless', 'rectangles', 'final'] as PipelineStage[])
-      .map((stage) => deriveStageStatus(state, stage))
-      .filter((status) => status.isVisible)
-  )
+  const stageStatuses = useEditorStore(selectStageStatuses)
 
   const handleOpenImage = async () => {
     try {

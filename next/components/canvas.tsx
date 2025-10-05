@@ -1,7 +1,7 @@
 'use client'
 
 import type Konva from 'konva'
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import {
   Circle,
   Image,
@@ -12,14 +12,24 @@ import {
   Transformer,
 } from 'react-konva'
 import ScaleControl from './scale-control'
-import { useEditorStore } from '@/lib/state'
+import { selectActiveBaseImage, useEditorStore } from '@/lib/state'
 
 function Canvas() {
-  const { tool, scale, image, textBlocks, setTextBlocks, inpaintedImage, selectedBlockIndex, setSelectedBlockIndex, currentStage, pipelineStages, renderMethod } = useEditorStore()
+  const tool = useEditorStore((state) => state.tool)
+  const scale = useEditorStore((state) => state.scale)
+  const image = useEditorStore((state) => state.image)
+  const textBlocks = useEditorStore((state) => state.textBlocks)
+  const setTextBlocks = useEditorStore((state) => state.setTextBlocks)
+  const inpaintedImage = useEditorStore((state) => state.inpaintedImage)
+  const selectedBlockIndex = useEditorStore((state) => state.selectedBlockIndex)
+  const setSelectedBlockIndex = useEditorStore((state) => state.setSelectedBlockIndex)
+  const currentStage = useEditorStore((state) => state.currentStage)
+  const renderMethod = useEditorStore((state) => state.renderMethod)
+  const activeStageImage = useEditorStore(selectActiveBaseImage())
   const containerRef = useRef<HTMLDivElement>(null)
   const inpaintLayerRef = useRef<Konva.Layer>(null)
 
-  const [selected, setSelected] = useState<any>(null)
+  const [selected, setSelected] = useState<Konva.Node | null>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
 
   // Handler for when a box is transformed (scaled/rotated/resized)
@@ -53,38 +63,12 @@ function Canvas() {
     setTextBlocks(updated)
   }
 
-  // Determine which base image to display based on currentStage
-  const getBaseImage = () => {
+  const baseImage = useMemo(() => {
     if (tool === 'inpaint' && inpaintedImage) {
       return inpaintedImage.bitmap
     }
-
-    switch (currentStage) {
-      case 'textless':
-        return pipelineStages.textless?.bitmap || image?.bitmap || null
-      case 'rectangles':
-        if (renderMethod !== 'rectangle') {
-          return pipelineStages.textless?.bitmap || image?.bitmap || null
-        }
-        return pipelineStages.rectangles?.bitmap || pipelineStages.textless?.bitmap || image?.bitmap || null
-      case 'final':
-        if (renderMethod === 'rectangle') {
-          return (
-            pipelineStages.final?.bitmap ||
-            pipelineStages.rectangles?.bitmap ||
-            pipelineStages.textless?.bitmap ||
-            image?.bitmap ||
-            null
-          )
-        }
-        return pipelineStages.final?.bitmap || pipelineStages.textless?.bitmap || image?.bitmap || null
-      case 'original':
-      default:
-        return image?.bitmap || null
-    }
-  }
-
-  const baseImage = getBaseImage()
+    return activeStageImage?.bitmap || image?.bitmap || null
+  }, [tool, inpaintedImage, activeStageImage, image])
   const shouldShowOverlays =
     tool === 'render' &&
     renderMethod === 'rectangle' &&
