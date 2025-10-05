@@ -2,6 +2,54 @@ import { create } from 'zustand'
 import { combine } from 'zustand/middleware'
 import { Image } from './image'
 
+export type PipelineStage = 'original' | 'textless' | 'rectangles' | 'final'
+
+export type StageStatus = {
+  stage: PipelineStage
+  image: Image | null
+  isVisible: boolean
+  isAvailable: boolean
+  isSelectable: boolean
+}
+
+type PipelineStages = Record<PipelineStage, Image | null>
+
+export type StageSnapshot = {
+  renderMethod: 'rectangle' | 'lama' | 'newlama'
+  pipelineStages: PipelineStages
+  image: Image | null
+}
+
+const stageToImage = (state: StageSnapshot, stage: PipelineStage): Image | null => {
+  switch (stage) {
+    case 'original':
+      return state.pipelineStages.original ?? state.image
+    case 'textless':
+      return state.pipelineStages.textless
+    case 'rectangles':
+      return state.pipelineStages.rectangles
+    case 'final':
+      return state.pipelineStages.final
+    default:
+      return null
+  }
+}
+
+export const deriveStageStatus = (state: StageSnapshot, stage: PipelineStage): StageStatus => {
+  const image = stageToImage(state, stage)
+  const isVisible = stage !== 'rectangles' || state.renderMethod === 'rectangle'
+  const isAvailable = stage === 'original' ? !!(state.pipelineStages.original ?? state.image) : !!image
+  const isSelectable = isVisible && (stage === 'original' ? isAvailable : !!image)
+
+  return {
+    stage,
+    image,
+    isVisible,
+    isAvailable,
+    isSelectable,
+  }
+}
+
 export interface RGB {
   r: number
   g: number
@@ -202,7 +250,7 @@ export const useEditorStore = create(
       pipelineStages: {
         original: null,
         textless: null,
-        withRectangles: null,
+        rectangles: null,
         final: null,
       },
       inpaintingConfig: INPAINTING_PRESETS.balanced,
@@ -225,18 +273,47 @@ export const useEditorStore = create(
       selectedBlockIndex: number | null
       gpuPreference: 'cuda' | 'directml' | 'cpu'
       currentStage: 'original' | 'textless' | 'rectangles' | 'final'
-      pipelineStages: {
-        original: Image | null
-        textless: Image | null
-        withRectangles: Image | null
-        final: Image | null
-      }
+      pipelineStages: PipelineStages
       inpaintingConfig: InpaintingConfig
       inpaintingPreset: 'fast' | 'balanced' | 'quality' | 'custom'
       defaultFont: string
     },
     (set) => ({
-      setImage: (image: Image | null) => set({ image }),
+      loadImageSession: (image: Image | null) =>
+        set((state) => {
+          const nextPipeline: PipelineStages = {
+            original: image,
+            textless: null,
+            rectangles: null,
+            final: null,
+          }
+
+          if (!image) {
+            return {
+              image: null,
+              pipelineStages: nextPipeline,
+              textBlocks: [],
+              segmentationMask: null,
+              inpaintedImage: null,
+              selectedBlockIndex: null,
+              currentStage: 'original' as PipelineStage,
+              tool: 'detection',
+              scale: 1,
+            }
+          }
+
+          return {
+            image,
+            pipelineStages: nextPipeline,
+            textBlocks: [],
+            segmentationMask: null,
+            inpaintedImage: null,
+            selectedBlockIndex: null,
+            currentStage: 'original' as PipelineStage,
+            tool: 'detection',
+            scale: 1,
+          }
+        }),
       setTool: (tool: string) => set({ tool }),
       setScale: (scale: number) => set({ scale }),
       setTextBlocks: (textBlocks: TextBlock[]) => set({ textBlocks }),
@@ -291,7 +368,24 @@ export const useEditorStore = create(
         if (typeof window !== 'undefined') {
           localStorage.setItem('render_method', method)
         }
-        set({ renderMethod: method })
+        set((state) => {
+          const updates: Partial<typeof state> = { renderMethod: method }
+
+          if (method !== 'rectangle') {
+            const fallbackStage: PipelineStage = state.pipelineStages.textless ? 'textless' : 'original'
+            if (state.currentStage === 'rectangles') {
+              updates.currentStage = fallbackStage
+            }
+            if (state.pipelineStages.rectangles) {
+              updates.pipelineStages = {
+                ...state.pipelineStages,
+                rectangles: null,
+              }
+            }
+          }
+
+          return updates
+        })
       },
       setSelectedBlockIndex: (index: number | null) => set({ selectedBlockIndex: index }),
       setGpuPreference: (pref: 'cuda' | 'directml' | 'cpu') => {
@@ -300,8 +394,15 @@ export const useEditorStore = create(
         }
         set({ gpuPreference: pref })
       },
-      setCurrentStage: (stage: 'original' | 'textless' | 'rectangles' | 'final') => set({ currentStage: stage }),
-      setPipelineStage: (stage: 'original' | 'textless' | 'withRectangles' | 'final', image: Image | null) =>
+      setCurrentStage: (stage: PipelineStage) =>
+        set((state) => {
+          const status = deriveStageStatus(state, stage)
+          if (!status.isSelectable) {
+            return {}
+          }
+          return { currentStage: stage }
+        }),
+      setPipelineStage: (stage: PipelineStage, image: Image | null) =>
         set((state) => ({
           pipelineStages: { ...state.pipelineStages, [stage]: image },
         })),
@@ -324,3 +425,46 @@ export const useEditorStore = create(
     })
   )
 )
+
+  export const getStageStatus = (stage: PipelineStage): StageStatus =>
+    deriveStageStatus(useEditorStore.getState(), stage)
+
+  export const getActiveBaseImage = (stageOverride?: PipelineStage): Image | null => {
+    const state = useEditorStore.getState()
+    const primaryStage = stageOverride ?? state.currentStage
+    const order: PipelineStage[] = []
+    const push = (value: PipelineStage) => {
+      if (!order.includes(value)) {
+        order.push(value)
+      }
+    }
+
+    push(primaryStage)
+
+    if (state.renderMethod === 'rectangle') {
+      push('final')
+      push('rectangles')
+      push('textless')
+    } else {
+      push('final')
+      push('textless')
+    }
+    push('original')
+
+    for (const candidate of order) {
+      const status = deriveStageStatus(state, candidate)
+      if (!status.isVisible) {
+        continue
+      }
+      if (status.image) {
+        return status.image
+      }
+    }
+
+    return state.image
+  }
+
+  export const getAllStageStatuses = (): StageStatus[] =>
+    (['original', 'textless', 'rectangles', 'final'] as PipelineStage[]).map((stage) =>
+      getStageStatus(stage)
+    )

@@ -160,6 +160,10 @@ export default function RenderPanel() {
 
       setTextBlocks(updated)
 
+      if (renderMethod !== 'rectangle') {
+        setPipelineStage('rectangles', null)
+      }
+
       // Switch to render tool and 'final' stage to show live preview with rendered text
       setTool('render')
       setCurrentStage('final')
@@ -209,15 +213,15 @@ export default function RenderPanel() {
           ctx.roundRect(x, y, width, height, radius)
           ctx.fill()
         }
+
+  const rectanglesBlob = await canvas.convertToBlob({ type: 'image/png' })
+  const rectanglesBuffer = await rectanglesBlob.arrayBuffer()
+  const rectanglesStage = await createImageFromBuffer(rectanglesBuffer)
+  setPipelineStage('rectangles', rectanglesStage)
       } else {
         console.log('[PIPELINE] Skipping rectangles for LaMa/NewLaMa mode (using textless plate)')
+        setPipelineStage('rectangles', null)
       }
-
-      // Save 'withRectangles' stage (base + backgrounds, no text yet)
-      const rectanglesBlob = await canvas.convertToBlob({ type: 'image/png' })
-      const rectanglesBuffer = await rectanglesBlob.arrayBuffer()
-      const rectanglesStage = await createImageFromBuffer(rectanglesBuffer)
-      setPipelineStage('withRectangles', rectanglesStage)
 
       // 3. Draw translated text with advanced typography support and proper wrapping
       for (const block of textBlocks) {

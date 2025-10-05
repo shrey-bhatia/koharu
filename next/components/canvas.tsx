@@ -15,7 +15,7 @@ import ScaleControl from './scale-control'
 import { useEditorStore } from '@/lib/state'
 
 function Canvas() {
-  const { tool, scale, image, textBlocks, setTextBlocks, inpaintedImage, selectedBlockIndex, setSelectedBlockIndex, currentStage, pipelineStages } = useEditorStore()
+  const { tool, scale, image, textBlocks, setTextBlocks, inpaintedImage, selectedBlockIndex, setSelectedBlockIndex, currentStage, pipelineStages, renderMethod } = useEditorStore()
   const containerRef = useRef<HTMLDivElement>(null)
   const inpaintLayerRef = useRef<Konva.Layer>(null)
 
@@ -63,9 +63,21 @@ function Canvas() {
       case 'textless':
         return pipelineStages.textless?.bitmap || image?.bitmap || null
       case 'rectangles':
-        return pipelineStages.withRectangles?.bitmap || pipelineStages.textless?.bitmap || image?.bitmap || null
+        if (renderMethod !== 'rectangle') {
+          return pipelineStages.textless?.bitmap || image?.bitmap || null
+        }
+        return pipelineStages.rectangles?.bitmap || pipelineStages.textless?.bitmap || image?.bitmap || null
       case 'final':
-        return pipelineStages.final?.bitmap || image?.bitmap || null
+        if (renderMethod === 'rectangle') {
+          return (
+            pipelineStages.final?.bitmap ||
+            pipelineStages.rectangles?.bitmap ||
+            pipelineStages.textless?.bitmap ||
+            image?.bitmap ||
+            null
+          )
+        }
+        return pipelineStages.final?.bitmap || pipelineStages.textless?.bitmap || image?.bitmap || null
       case 'original':
       default:
         return image?.bitmap || null
@@ -73,7 +85,10 @@ function Canvas() {
   }
 
   const baseImage = getBaseImage()
-  const shouldShowOverlays = tool === 'render' && (currentStage === 'rectangles' || currentStage === 'final')
+  const shouldShowOverlays =
+    tool === 'render' &&
+    renderMethod === 'rectangle' &&
+    (currentStage === 'rectangles' || currentStage === 'final')
 
   return (
     <>

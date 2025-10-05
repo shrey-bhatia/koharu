@@ -3,13 +3,23 @@
 import { Image, Moon, Sun } from 'lucide-react'
 import { Button, IconButton, Badge } from '@radix-ui/themes'
 import { fileOpen } from 'browser-fs-access'
-import { useEditorStore } from '@/lib/state'
+import { useEditorStore, deriveStageStatus, PipelineStage } from '@/lib/state'
 import { createImageFromBlob } from '@/lib/image'
 import SettingsDialog from './settings-dialog'
 import DetectionControls from './detection-controls'
 
 function Topbar() {
-  const { setImage, theme, setTheme, tool, currentStage, setCurrentStage, pipelineStages } = useEditorStore()
+  const loadImageSession = useEditorStore((state) => state.loadImageSession)
+  const theme = useEditorStore((state) => state.theme)
+  const setTheme = useEditorStore((state) => state.setTheme)
+  const tool = useEditorStore((state) => state.tool)
+  const currentStage = useEditorStore((state) => state.currentStage)
+  const setCurrentStage = useEditorStore((state) => state.setCurrentStage)
+  const stageStatuses = useEditorStore((state) =>
+    (['original', 'textless', 'rectangles', 'final'] as PipelineStage[])
+      .map((stage) => deriveStageStatus(state, stage))
+      .filter((status) => status.isVisible)
+  )
 
   const handleOpenImage = async () => {
     try {
@@ -21,17 +31,17 @@ function Topbar() {
       if (!blob) return
 
       const image = await createImageFromBlob(blob)
-      setImage(image)
+      loadImageSession(image)
     } catch (err) {
       alert(`Error opening image: ${err}`)
     }
   }
 
-  const stageLabels = {
+  const stageLabels: Record<PipelineStage, string> = {
     original: 'Original',
-    textless: 'Textless',
+    textless: 'Clean Plate',
     rectangles: '+Backgrounds',
-    final: 'Final'
+    final: 'Final',
   }
 
   return (
@@ -48,22 +58,20 @@ function Topbar() {
         {/* Pipeline Stage Viewer */}
         {(tool === 'render' || tool === 'inpaint') && (
           <div className='flex items-center gap-1'>
-            {(['original', 'textless', 'rectangles', 'final'] as const).map((stage) => {
-              const stageName = stage === 'rectangles' ? 'withRectangles' : stage
-              const hasStage = stage === 'original' || pipelineStages[stageName as keyof typeof pipelineStages] !== null
-              const isActive = currentStage === stage
+            {stageStatuses.map((status) => {
+              const isActive = currentStage === status.stage
 
               return (
                 <Button
-                  key={stage}
+                  key={status.stage}
                   size='1'
                   variant={isActive ? 'solid' : 'soft'}
                   color={isActive ? 'blue' : 'gray'}
-                  disabled={!hasStage}
-                  onClick={() => setCurrentStage(stage)}
+                  disabled={!status.isSelectable}
+                  onClick={() => setCurrentStage(status.stage)}
                 >
-                  {stageLabels[stage]}
-                  {!hasStage && <Badge size='1' color='gray' ml='1'>-</Badge>}
+                  {stageLabels[status.stage]}
+                  {!status.isAvailable && <Badge size='1' color='gray' ml='1'>-</Badge>}
                 </Button>
               )
             })}
