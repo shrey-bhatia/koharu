@@ -1,12 +1,15 @@
 import { create } from 'zustand'
 import { basename } from '@tauri-apps/api/path'
 import { BatchRunner } from './batch-runner'
+import { createBatchLogEntry } from './batch-types'
 import type {
   BatchConfig,
   BatchPage,
   BatchStatus,
   BatchStopReason,
   BatchSummary,
+  BatchPageLogEntry,
+  BatchPageStage,
 } from './batch-types'
 import { INPAINTING_PRESETS } from './state'
 import type { InpaintingConfig } from './state'
@@ -69,6 +72,8 @@ interface BatchStoreActions {
   markError: (message: string) => void
   clearError: () => void
   updatePage: (id: string, updates: Partial<BatchPage>) => void
+  retryPage: (id: string) => void
+  appendLog: (id: string, entry: BatchPageLogEntry) => void
   incrementIndex: () => void
   setCurrentIndex: (index: number) => void
   setStatus: (status: BatchStatus) => void
@@ -105,6 +110,7 @@ export const useBatchStore = create<BatchStore>((set, get) => ({
         stage: 'pending' as BatchPage['stage'],
         progress: 0,
         stageTimings: {},
+        logs: [createBatchLogEntry('Queued for processing')],
       }))
     )
 
@@ -197,11 +203,20 @@ export const useBatchStore = create<BatchStore>((set, get) => ({
         outputImagePath: undefined,
         manifestPath: undefined,
         stageTimings: {},
+        logs: [...(page.logs ?? []), createBatchLogEntry('Preparing for processing')],
       })),
       currentIndex: 0,
     }))
 
-    const runner = new BatchRunner(get, set)
+    const runner = new BatchRunner(get, (updater) => {
+      set((state): BatchStore | Partial<BatchStore> => {
+        const result = updater(state)
+        if (result === undefined) {
+          return state
+        }
+        return result as Partial<BatchStore>
+      })
+    })
 
     set({
       config: nextConfig,
@@ -228,7 +243,15 @@ export const useBatchStore = create<BatchStore>((set, get) => ({
     const state = get()
     if (state.status !== 'paused') return
 
-    const runner = new BatchRunner(get, set)
+    const runner = new BatchRunner(get, (updater) => {
+      set((state): BatchStore | Partial<BatchStore> => {
+        const result = updater(state)
+        if (result === undefined) {
+          return state
+        }
+        return result as Partial<BatchStore>
+      })
+    })
     set({
       status: 'running',
       shouldStop: false,
@@ -257,6 +280,54 @@ export const useBatchStore = create<BatchStore>((set, get) => ({
   updatePage(id, updates) {
     set((state) => ({
       pages: state.pages.map((page) => (page.id === id ? { ...page, ...updates } : page)),
+    }))
+  },
+
+  retryPage(id) {
+    set((state) => {
+      const pages = state.pages.map((page) => {
+        if (page.id !== id) return page
+        return {
+          ...page,
+          stage: 'pending' as BatchPageStage,
+          progress: 0,
+          error: undefined,
+          warnings: [],
+          startedAt: undefined,
+          completedAt: undefined,
+          outputImagePath: undefined,
+          manifestPath: undefined,
+          stageTimings: {},
+          logs: [...(page.logs ?? []), createBatchLogEntry('Marked for retry')],
+        }
+      })
+
+      const retryIndex = pages.findIndex((page) => page.id === id)
+      const nextIndex = retryIndex === -1 ? state.currentIndex : Math.min(state.currentIndex, retryIndex)
+      const shouldResetMetadata = state.status === 'completed' || state.status === 'cancelled'
+
+      return {
+        pages,
+        currentIndex: nextIndex,
+        status: shouldResetMetadata && pages.length > 0 ? 'ready' : state.status,
+        completedAt: shouldResetMetadata ? null : state.completedAt,
+        summary: shouldResetMetadata ? null : state.summary,
+        shouldStop: shouldResetMetadata ? false : state.shouldStop,
+        stopReason: shouldResetMetadata ? null : state.stopReason,
+      }
+    })
+  },
+
+  appendLog(id, entry) {
+    set((state) => ({
+      pages: state.pages.map((page) =>
+        page.id === id
+          ? {
+              ...page,
+              logs: [...(page.logs ?? []), entry],
+            }
+          : page
+      ),
     }))
   },
 

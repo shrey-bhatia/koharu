@@ -1,5 +1,30 @@
 import type { InpaintingConfig } from './state'
 
+export type BatchLogLevel = 'info' | 'warning' | 'error'
+
+export interface BatchPageLogEntry {
+  id: string
+  timestamp: number
+  level: BatchLogLevel
+  message: string
+  stage?: BatchPageStage
+}
+
+export const createBatchLogEntry = (
+  message: string,
+  level: BatchLogLevel = 'info',
+  stage?: BatchPageStage
+): BatchPageLogEntry => ({
+  id:
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  timestamp: Date.now(),
+  level,
+  message,
+  stage,
+})
+
 export type BatchPageStage =
   | 'pending'
   | 'loading'
@@ -37,6 +62,7 @@ export interface BatchPage {
   outputImagePath?: string
   manifestPath?: string
   stageTimings: Partial<Record<BatchPageStage, number>>
+  logs: BatchPageLogEntry[]
 }
 
 export interface BatchSummary {

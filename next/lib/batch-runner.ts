@@ -2,8 +2,15 @@ import { readBinaryFile, writeBinaryFile, writeTextFile, createDir } from '@taur
 import { basename, extname, join } from '@tauri-apps/api/path'
 import { invoke } from '@tauri-apps/api/core'
 import type { BatchStore } from './batch-state'
-import type { BatchConfig, BatchPage, BatchPageStage, BatchSummary } from './batch-types'
-import type { BatchStopReason } from './batch-types'
+import { createBatchLogEntry } from './batch-types'
+import type {
+  BatchConfig,
+  BatchPage,
+  BatchPageStage,
+  BatchSummary,
+  BatchLogLevel,
+  BatchStopReason,
+} from './batch-types'
 import type { TextBlock } from './state'
 import { analyzeTextAppearance } from '@/utils/appearance-analysis'
 import { crop, imageBitmapToArrayBuffer, maskToArrayBuffer } from '@/utils/image'
@@ -34,6 +41,50 @@ export class BatchRunner {
     private readonly getState: () => BatchStore,
     private readonly setState: (partial: (state: BatchStore) => Partial<BatchStore> | void) => void
   ) {}
+
+  private log(pageId: string, message: string, level: BatchLogLevel = 'info', stage?: BatchPageStage) {
+    const store = this.getState()
+    if (typeof store.appendLog === 'function') {
+      store.appendLog(pageId, createBatchLogEntry(message, level, stage))
+    }
+  }
+
+  private describeStage(stage: BatchPageStage): string {
+    switch (stage) {
+      case 'loading':
+        return 'Loading source image'
+      case 'detection':
+        return 'Running text detection'
+      case 'ocr':
+        return 'Performing OCR'
+      case 'translation':
+        return 'Translating text'
+      case 'inpainting':
+        return 'Applying inpainting'
+      case 'coloring':
+        return 'Analyzing appearance'
+      case 'render':
+        return 'Rendering final image'
+      case 'saving':
+        return 'Saving outputs'
+      case 'pending':
+        return 'Pending'
+      case 'done':
+        return 'Completed'
+      case 'failed':
+        return 'Failed'
+      default:
+        return stage
+    }
+  }
+
+  private formatDuration(durationMs: number): string {
+    if (durationMs >= 1000) {
+      const seconds = durationMs / 1000
+      return seconds >= 10 ? `${seconds.toFixed(1)}s` : `${seconds.toFixed(2)}s`
+    }
+    return `${Math.round(durationMs)}ms`
+  }
 
   requestStop(reason: BatchStopReason) {
     this.stopRequested = true
@@ -134,7 +185,7 @@ export class BatchRunner {
     this.updatePage(pageId, { progress })
   }
 
-  private appendWarning(pageId: string, warning: string) {
+  private appendWarning(pageId: string, warning: string, stage?: BatchPageStage) {
     this.setState((state) => ({
       pages: state.pages.map((page) =>
         page.id === pageId
@@ -145,6 +196,7 @@ export class BatchRunner {
           : page
       ),
     }))
+    this.log(pageId, warning, 'warning', stage)
   }
 
   private recordTiming(pageId: string, stage: BatchPageStage, durationMs: number) {
@@ -167,11 +219,12 @@ export class BatchRunner {
     const state = this.getState()
     const page = state.pages[index]
     const config = state.config
-  const stageOrder = this.buildStageSequence(config.renderMethod)
+    const stageOrder = this.buildStageSequence(config.renderMethod)
     let textBlocks: TextBlock[] = []
     let segmentationMask: number[] | null = null
     let textlessImage: Image | null = null
 
+    this.log(page.id, `Starting processing for ${page.fileName}`)
     this.updatePage(page.id, {
       stage: 'loading',
       progress: 0,
@@ -197,7 +250,7 @@ export class BatchRunner {
       textBlocks = detection.textBlocks
       segmentationMask = detection.segmentationMask
       if (textBlocks.length === 0) {
-        this.appendWarning(page.id, 'No text regions were detected in this page.')
+        this.appendWarning(page.id, 'No text regions were detected in this page.', 'detection')
       }
       this.updateStageProgress(page.id, stageOrder, 'detection')
       if (this.shouldAbort()) return
@@ -248,6 +301,14 @@ export class BatchRunner {
       this.updateStageProgress(page.id, stageOrder, 'saving')
       if (this.shouldAbort()) return
 
+      this.log(
+        page.id,
+        `Saved outputs to ${outputs.outputImagePath}${
+          outputs.manifestPath ? ` (manifest: ${outputs.manifestPath})` : ''
+        }`,
+        'info',
+        'saving'
+      )
       this.updatePage(page.id, {
         stage: 'done',
         progress: 1,
@@ -255,6 +316,7 @@ export class BatchRunner {
         outputImagePath: outputs.outputImagePath,
         manifestPath: outputs.manifestPath,
       })
+      this.log(page.id, 'Page processed successfully')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
       console.error(`[BatchRunner] Page ${page.fileName} failed`, error)
@@ -264,6 +326,7 @@ export class BatchRunner {
         error: message,
         completedAt: Date.now(),
       })
+      this.log(page.id, `Page failed: ${message}`, 'error')
     }
   }
 
@@ -274,12 +337,19 @@ export class BatchRunner {
   ): Promise<T> {
     const start = performance.now()
     this.updatePage(pageId, { stage })
+    const label = this.describeStage(stage)
+    this.log(pageId, `${label} started`, 'info', stage)
     try {
       const result = await handler()
-      this.recordTiming(pageId, stage, performance.now() - start)
+      const duration = performance.now() - start
+      this.recordTiming(pageId, stage, duration)
+      this.log(pageId, `${label} completed in ${this.formatDuration(duration)}`, 'info', stage)
       return result
     } catch (error) {
-      this.recordTiming(pageId, stage, performance.now() - start)
+      const duration = performance.now() - start
+      this.recordTiming(pageId, stage, duration)
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      this.log(pageId, `${label} failed: ${message}`, 'error', stage)
       throw error
     }
   }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Badge,
   Button,
@@ -20,12 +20,16 @@ import {
   PauseCircle,
   PlayCircle,
   RefreshCw,
+  RotateCcw,
   Square,
   Trash2,
   Upload,
+  ExternalLink,
 } from 'lucide-react'
 import { useBatchStore } from '@/lib/batch-state'
 import { open as openDialog } from '@tauri-apps/api/dialog'
+import { open as openPath } from '@tauri-apps/api/shell'
+import type { BatchPage } from '@/lib/batch-types'
 
 const statusColors: Record<string, 'gray' | 'green' | 'red' | 'orange' | 'amber' | 'blue'> = {
   idle: 'gray',
@@ -49,6 +53,17 @@ const stageLabels: Record<string, string> = {
   saving: 'Saving',
   done: 'Done',
   failed: 'Failed',
+}
+
+const logLevelColors: Record<'info' | 'warning' | 'error', 'gray' | 'amber' | 'red'> = {
+  info: 'gray',
+  warning: 'amber',
+  error: 'red',
+}
+
+const formatLogTimestamp = (timestamp: number) => {
+  const date = new Date(timestamp)
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 const formatDuration = (startedAt?: number | null, completedAt?: number | null) => {
@@ -88,11 +103,28 @@ function BatchPanel() {
   const pauseJob = useBatchStore((state) => state.pauseJob)
   const resumeJob = useBatchStore((state) => state.resumeJob)
   const cancelJob = useBatchStore((state) => state.cancelJob)
+  const retryPage = useBatchStore((state) => state.retryPage)
   const summary = useBatchStore((state) => state.summary)
   const markError = useBatchStore((state) => state.markError)
   const clearError = useBatchStore((state) => state.clearError)
 
   const [busy, setBusy] = useState(false)
+  const [selectedPageId, setSelectedPageId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (pages.length === 0) {
+      setSelectedPageId(null)
+      return
+    }
+    if (!selectedPageId || !pages.some((page) => page.id === selectedPageId)) {
+      setSelectedPageId(pages[0].id)
+    }
+  }, [pages, selectedPageId])
+
+  const selectedPage = useMemo(() => pages.find((page) => page.id === selectedPageId) ?? null, [pages, selectedPageId])
+  const selectedLogs = selectedPage?.logs ?? []
+  const canOpenSelectedOutput = Boolean(selectedPage?.outputImagePath || selectedPage?.manifestPath)
+  const canRetrySelectedPage = Boolean(selectedPage && (selectedPage.stage === 'failed' || selectedPage.stage === 'done'))
 
   const overallProgress = useMemo(() => {
     if (pages.length === 0) return 0
@@ -191,6 +223,32 @@ function BatchPanel() {
 
   const handleCancel = () => {
     cancelJob()
+  }
+
+  const handleOpenOutput = async (page: BatchPage) => {
+    if (!tauriAvailable) {
+      markError('Opening output requires the desktop app (Tauri).')
+      return
+    }
+
+    const target = page.outputImagePath ?? page.manifestPath
+    if (!target) {
+      markError('No output is available for this page yet.')
+      return
+    }
+
+    try {
+      await openPath(target)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to open output'
+      markError(message)
+    }
+  }
+
+  const handleRetryPage = (page: BatchPage) => {
+    if (status === 'running') return
+    retryPage(page.id)
+    setSelectedPageId(page.id)
   }
 
   return (
@@ -327,8 +385,16 @@ function BatchPanel() {
             {pages.map((page) => {
               const percent = getPercent(page.progress)
               const stageLabel = stageLabels[page.stage] ?? page.stage
+              const isSelected = selectedPageId === page.id
               return (
-                <Table.Row key={page.id}>
+                <Table.Row
+                  key={page.id}
+                  onClick={() => setSelectedPageId(page.id)}
+                  className={`cursor-pointer transition-colors ${
+                    isSelected ? 'bg-gray-50 dark:bg-gray-900' : ''
+                  }`}
+                  aria-selected={isSelected}
+                >
                   <Table.Cell className='max-w-[140px] truncate text-xs font-medium'>{page.fileName}</Table.Cell>
                   <Table.Cell>
                     <Badge size='1' color={page.stage === 'failed' ? 'red' : page.stage === 'done' ? 'green' : 'gray'}>
@@ -347,15 +413,48 @@ function BatchPanel() {
                     </Text>
                   </Table.Cell>
                   <Table.Cell align='right'>
-                    <Button
-                      size='1'
-                      variant='ghost'
-                      color='red'
-                      onClick={() => removePage(page.id)}
-                      disabled={status === 'running'}
-                    >
-                      <Trash2 className='h-3 w-3' />
-                    </Button>
+                    <Flex gap='1' justify='end'>
+                      <Button
+                        size='1'
+                        variant='ghost'
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          void handleOpenOutput(page)
+                        }}
+                        disabled={!tauriAvailable || (!page.outputImagePath && !page.manifestPath)}
+                        aria-label='Open output'
+                      >
+                        <ExternalLink className='h-3 w-3' />
+                      </Button>
+                      <Button
+                        size='1'
+                        variant='ghost'
+                        color='blue'
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          handleRetryPage(page)
+                        }}
+                        disabled={
+                          status === 'running' || (page.stage !== 'failed' && page.stage !== 'done')
+                        }
+                        aria-label='Retry page'
+                      >
+                        <RotateCcw className='h-3 w-3' />
+                      </Button>
+                      <Button
+                        size='1'
+                        variant='ghost'
+                        color='red'
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          removePage(page.id)
+                        }}
+                        disabled={status === 'running'}
+                        aria-label='Remove page'
+                      >
+                        <Trash2 className='h-3 w-3' />
+                      </Button>
+                    </Flex>
                   </Table.Cell>
                 </Table.Row>
               )
@@ -363,6 +462,66 @@ function BatchPanel() {
           </Table.Body>
         </Table.Root>
       </ScrollArea>
+      {selectedPage && (
+        <div className='space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900'>
+          <Flex align='center' justify='between'>
+            <div>
+              <Text className='text-sm font-semibold dark:text-gray-100'>Activity Log</Text>
+              <Text className='text-xs text-gray-500 dark:text-gray-400'>{selectedPage.fileName}</Text>
+            </div>
+            <Flex gap='2'>
+              <Button
+                size='1'
+                variant='soft'
+                onClick={() => selectedPage && void handleOpenOutput(selectedPage)}
+                disabled={!tauriAvailable || !canOpenSelectedOutput}
+              >
+                <ExternalLink className='mr-1 h-3 w-3' />
+                Open Output
+              </Button>
+              <Button
+                size='1'
+                variant='soft'
+                color='blue'
+                onClick={() => selectedPage && handleRetryPage(selectedPage)}
+                disabled={status === 'running' || !canRetrySelectedPage}
+              >
+                <RotateCcw className='mr-1 h-3 w-3' />
+                Retry Page
+              </Button>
+            </Flex>
+          </Flex>
+          <ScrollArea className='max-h-48 pr-2'>
+            {selectedLogs.length === 0 ? (
+              <Text className='text-xs text-gray-500 dark:text-gray-400'>No log entries yet.</Text>
+            ) : (
+              <div className='space-y-2'>
+                {selectedLogs.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className='rounded-md border border-gray-200 bg-white p-2 shadow-sm dark:border-gray-700 dark:bg-gray-800'
+                  >
+                    <Flex align='center' gap='2' wrap='wrap'>
+                      <Text className='font-mono text-[11px] text-gray-500 dark:text-gray-400'>
+                        {formatLogTimestamp(entry.timestamp)}
+                      </Text>
+                      {entry.stage && (
+                        <Badge size='1' color='gray'>
+                          {stageLabels[entry.stage] ?? entry.stage}
+                        </Badge>
+                      )}
+                      <Badge size='1' color={logLevelColors[entry.level] ?? 'gray'}>
+                        {entry.level.toUpperCase()}
+                      </Badge>
+                    </Flex>
+                    <Text className='text-xs text-gray-700 dark:text-gray-200'>{entry.message}</Text>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </div>
+      )}
     </Card>
   )
 }
