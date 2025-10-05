@@ -40,14 +40,18 @@ Builds are available for Windows only at the moment. Please refer to the [build 
 > [!NOTE]
 > Koharu is still in development and may not work perfectly. Please report any issues you encounter on the [issues page](https://github.com/mayocream/koharu/issues).
 
+> [!IMPORTANT]
+> **Current Status (2025-10-04)**: This project was partially completed by the original developer. Community members have fixed detection and OCR. Translation and text rendering are still in progress. See [PIPELINE.md](./PIPELINE.md) for detailed implementation status.
+
 ## Features
 
 The workflow of translation consists of the following steps:
 
-- [x] Detect the text in the manga using a text detection model.
-- [x] Extract the detected text using an OCR model.
-- [x] Translate the extracted text using an LLM.
-- [x] Inpaint the translated text back into the manga using an inpainting model.
+- [x] Detect the text in the manga using a text detection model. ✅ **Working**
+- [x] Extract the detected text using an OCR model. ✅ **Working**
+- [ ] Translate the extracted text using an LLM. ⚠️ **In Progress**
+- [ ] Inpaint the translated text back into the manga using an inpainting model. ⚠️ **Backend Ready, UI Missing**
+- [ ] Render translated text onto inpainted image. ❌ **Not Implemented**
 
 ## Models
 
@@ -90,3 +94,84 @@ The workflow of translation consists of the following steps:
 ```bash
 bun tauri dev
 ```
+
+## Project Documentation
+
+For developers and contributors:
+
+- **[PIPELINE.md](./PIPELINE.md)** - Complete technical documentation of the translation pipeline, current implementation status, and architecture
+- **[AGENTS.md](./AGENTS.md)** - Coding guidelines and best practices for AI agents and developers working on this project
+- **[TODO.md](./TODO.md)** - Development roadmap with phase-by-phase task breakdown and next steps
+
+## Usage
+
+### Quick Start
+
+1. Launch the application
+2. Click the image icon (top-left) to load a manga page
+3. Click the chat icon (sidebar) to switch to detection mode
+4. Adjust detection thresholds if needed (default 0.5 works well)
+5. Click the Play button next to "Detection"
+   - Red bounding boxes will appear around detected text
+6. Click the Play button next to "OCR"
+   - Japanese text will be extracted and displayed in the list below
+7. *(Translation and inpainting features coming soon)*
+
+### Current Limitations
+
+- Translation is not yet implemented (see TODO.md for progress)
+- Inpainting UI is missing (backend ready, waiting for frontend)
+- Text rendering is not implemented
+- Only works on Windows with NVIDIA GPU (CUDA required)
+
+## Troubleshooting
+
+### "0 blocks detected" after clicking Detection
+
+- Try lowering the confidence threshold (e.g., 0.3-0.4)
+- Ensure the manga image has clear text regions
+- Check browser console (F12) for errors
+
+### OCR button does nothing
+
+- Make sure you ran Detection first
+- Check that text blocks are detected (count > 0)
+- Verify browser console for errors
+
+### App won't launch
+
+- Ensure CUDA 12.9 and cuDNN 9.11 are installed
+- Verify PATH includes CUDA/cuDNN bin directories
+- Check that HuggingFace models downloaded to `%USERPROFILE%\.cache\huggingface\hub\`
+
+## Build Time Optimization
+
+Full builds take 3-7 minutes due to Rust compilation and CUDA bindings. To speed up development:
+
+```bash
+# Use dev mode for rapid iteration (hot reload)
+bun tauri dev
+
+# Build without installers (faster testing)
+bun tauri build -- --features=cuda --no-bundle
+
+# Install sccache for Rust compilation caching
+cargo install sccache
+```
+
+See [TODO.md](./TODO.md#build-time-optimization-notes) for detailed optimization options.
+
+## Contributing
+
+This is a community-maintained fork of the original koharu project. Contributions welcome!
+
+Before contributing:
+1. Read [AGENTS.md](./AGENTS.md) for coding guidelines
+2. Check [TODO.md](./TODO.md) for current roadmap
+3. Review [PIPELINE.md](./PIPELINE.md) to understand the architecture
+
+Please ensure:
+- Code builds and tests pass
+- Documentation is updated
+- No API keys or secrets are committed
+- Commit messages are clear and descriptive
