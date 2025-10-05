@@ -171,10 +171,16 @@ export default function SettingsDialog() {
                           <span className='text-xs text-gray-500'>500,000 characters/month free</span>
                         </div>
                       </Select.Item>
-                      <Select.Item value='deepl'>
+                      <Select.Item value='deepl-free'>
                         <div className='flex flex-col'>
-                          <span className='font-medium'>DeepL</span>
+                          <span className='font-medium'>DeepL Free</span>
                           <span className='text-xs text-gray-500'>500,000 characters/month free</span>
+                        </div>
+                      </Select.Item>
+                      <Select.Item value='deepl-pro'>
+                        <div className='flex flex-col'>
+                          <span className='font-medium'>DeepL Pro</span>
+                          <span className='text-xs text-gray-500'>Paid plan with unlimited usage</span>
                         </div>
                       </Select.Item>
                     </Select.Content>
@@ -225,7 +231,7 @@ export default function SettingsDialog() {
                     Test Connection
                   </Button>
                   {((selectedProvider === 'google' && googleApiKeyInput) ||
-                    (selectedProvider === 'deepl' && deeplApiKeyInput)) && (
+                    ((selectedProvider === 'deepl-free' || selectedProvider === 'deepl-pro') && deeplApiKeyInput)) && (
                     <Button size='1' variant='soft' color='red' onClick={handleClearCurrentProvider}>
                       Clear
                     </Button>
@@ -263,9 +269,9 @@ export default function SettingsDialog() {
                         <strong>Free tier:</strong> 500,000 characters/month
                       </div>
                     </>
-                  ) : (
+                  ) : selectedProvider === 'deepl-free' ? (
                     <>
-                      <strong>How to get a DeepL API key:</strong>
+                      <strong>How to get a DeepL Free API key:</strong>
                       <ol className='ml-4 mt-2 list-decimal space-y-1'>
                         <li>Go to DeepL API website (deepl.com/pro-api)</li>
                         <li>Sign up for DeepL API Free plan</li>
@@ -276,8 +282,23 @@ export default function SettingsDialog() {
                         <strong>Free tier:</strong> 500,000 characters/month
                       </div>
                       <div className='mt-2 text-yellow-700 dark:text-yellow-500'>
-                        <strong>Note:</strong> Use the Free API endpoint (api-free.deepl.com). Pro keys
-                        won't work with the free endpoint.
+                        <strong>Important:</strong> Free API keys only work with the free endpoint (api-free.deepl.com).
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <strong>How to get a DeepL Pro API key:</strong>
+                      <ol className='ml-4 mt-2 list-decimal space-y-1'>
+                        <li>Go to DeepL API website (deepl.com/pro-api)</li>
+                        <li>Subscribe to DeepL API Pro plan</li>
+                        <li>Find your API key in the account settings</li>
+                        <li>Copy and paste the key above</li>
+                      </ol>
+                      <div className='mt-2'>
+                        <strong>Pro plan:</strong> Pay-as-you-go pricing with higher rate limits
+                      </div>
+                      <div className='mt-2 text-yellow-700 dark:text-yellow-500'>
+                        <strong>Important:</strong> Pro API keys only work with the pro endpoint (api.deepl.com).
                       </div>
                     </>
                   )}

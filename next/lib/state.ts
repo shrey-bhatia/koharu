@@ -139,9 +139,9 @@ const loadDeeplApiKey = (): string | null => {
 }
 
 // Load translation provider preference
-const loadTranslationProvider = (): 'google' | 'deepl' => {
+const loadTranslationProvider = (): 'google' | 'deepl-free' | 'deepl-pro' => {
   if (typeof window === 'undefined') return 'google'
-  return (localStorage.getItem('translation_provider') as 'google' | 'deepl') || 'google'
+  return (localStorage.getItem('translation_provider') as 'google' | 'deepl-free' | 'deepl-pro') || 'google'
 }
 
 // Load theme preference
@@ -201,7 +201,7 @@ export const useEditorStore = create(
       textBlocks: TextBlock[]
       translationApiKey: string | null
       deeplApiKey: string | null
-      translationProvider: 'google' | 'deepl'
+      translationProvider: 'google' | 'deepl-free' | 'deepl-pro'
       segmentationMask: number[] | null
       inpaintedImage: Image | null
       theme: 'light' | 'dark'
@@ -244,7 +244,7 @@ export const useEditorStore = create(
         }
         set({ deeplApiKey: key })
       },
-      setTranslationProvider: (provider: 'google' | 'deepl') => {
+      setTranslationProvider: (provider: 'google' | 'deepl-free' | 'deepl-pro') => {
         if (typeof window !== 'undefined') {
           localStorage.setItem('translation_provider', provider)
         }

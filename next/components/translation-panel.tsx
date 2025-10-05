@@ -27,7 +27,11 @@ function TranslationPanel() {
 
     // Check for API key
     if (!currentApiKey) {
-      const providerName = translationProvider === 'google' ? 'Google Cloud Translation' : 'DeepL'
+      const providerName = translationProvider === 'google'
+        ? 'Google Cloud Translation'
+        : translationProvider === 'deepl-free'
+        ? 'DeepL Free'
+        : 'DeepL Pro'
       setError(`API key not set. Click the settings icon in the top bar to add your ${providerName} API key.`)
       return
     }

@@ -1,10 +1,10 @@
 /**
  * Multi-provider Translation API wrapper
- * Supports Google Cloud Translation and DeepL
+ * Supports Google Cloud Translation and DeepL (Free and Pro)
  * Uses REST API (no SDK needed) - works in browser/Tauri context
  */
 
-export type TranslationProvider = 'google' | 'deepl'
+export type TranslationProvider = 'google' | 'deepl-free' | 'deepl-pro'
 
 export interface TranslationError {
   code: number
@@ -97,7 +97,8 @@ export async function translateWithGoogle(
  *
  * @param text - Text to translate
  * @param apiKey - DeepL API key
- * @param sourceLang - Source language code (default: 'JA' for Japanese)
+ * @param usePro - Whether to use Pro endpoint (default: false for free tier)
+ * @param sourceLang - Source language code (default: 'JA' for Japanese, null for auto-detect)
  * @param targetLang - Target language code (default: 'EN' for English)
  * @returns Translated text
  *
@@ -106,7 +107,8 @@ export async function translateWithGoogle(
 export async function translateWithDeepL(
   text: string,
   apiKey: string,
-  sourceLang = 'JA',
+  usePro = false,
+  sourceLang: string | null = 'JA',
   targetLang = 'EN'
 ): Promise<string> {
   if (!text || text.trim().length === 0) {
@@ -119,20 +121,27 @@ export async function translateWithDeepL(
 
   try {
     // DeepL uses different endpoints for free vs pro tier
-    // Free tier endpoint: api-free.deepl.com
-    const url = 'https://api-free.deepl.com/v2/translate'
+    const baseUrl = usePro ? 'https://api.deepl.com' : 'https://api-free.deepl.com'
+    const url = `${baseUrl}/v2/translate`
+
+    // Build request body - only include source_lang if provided
+    const requestBody: { text: string[]; target_lang: string; source_lang?: string } = {
+      text: [text],
+      target_lang: targetLang.toUpperCase(),
+    }
+
+    if (sourceLang) {
+      requestBody.source_lang = sourceLang.toUpperCase()
+    }
 
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `DeepL-Auth-Key ${apiKey}`,
+        'User-Agent': 'Koharu/1.0',
       },
-      body: JSON.stringify({
-        text: [text],
-        source_lang: sourceLang.toUpperCase(),
-        target_lang: targetLang.toUpperCase(),
-      }),
+      body: JSON.stringify(requestBody),
     })
 
     if (!response.ok) {
@@ -170,7 +179,7 @@ export async function translateWithDeepL(
  * Unified translation function that routes to the correct provider
  *
  * @param text - Text to translate
- * @param provider - Translation provider ('google' or 'deepl')
+ * @param provider - Translation provider ('google', 'deepl-free', or 'deepl-pro')
  * @param apiKey - API key for the selected provider
  * @param sourceLang - Source language code
  * @param targetLang - Target language code
@@ -183,9 +192,10 @@ export async function translate(
   sourceLang = 'ja',
   targetLang = 'en'
 ): Promise<string> {
-  if (provider === 'deepl') {
+  if (provider === 'deepl-free' || provider === 'deepl-pro') {
     // DeepL uses uppercase language codes
-    return translateWithDeepL(text, apiKey, sourceLang.toUpperCase(), targetLang.toUpperCase())
+    const usePro = provider === 'deepl-pro'
+    return translateWithDeepL(text, apiKey, usePro, sourceLang.toUpperCase(), targetLang.toUpperCase())
   } else {
     // Google uses lowercase language codes
     return translateWithGoogle(text, apiKey, sourceLang.toLowerCase(), targetLang.toLowerCase())
