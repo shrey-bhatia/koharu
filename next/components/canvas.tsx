@@ -53,9 +53,14 @@ function Canvas() {
     setTextBlocks(updated)
   }
 
-  // Determine which base image to display based on currentStage
+  // Determine which base image to display based on currentStage and renderMethod
   const getBaseImage = () => {
     if (tool === 'inpaint' && inpaintedImage) {
+      return inpaintedImage.bitmap
+    }
+
+    // For LaMa/NewLaMa render methods in render tool, use inpainted image as base when available
+    if (tool === 'render' && (renderMethod === 'lama' || renderMethod === 'newlama') && inpaintedImage) {
       return inpaintedImage.bitmap
     }
 
