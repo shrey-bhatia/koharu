@@ -15,7 +15,7 @@ import ScaleControl from './scale-control'
 import { useEditorStore } from '@/lib/state'
 
 function Canvas() {
-  const { tool, scale, image, textBlocks, setTextBlocks, inpaintedImage, selectedBlockIndex, setSelectedBlockIndex, currentStage, pipelineStages } = useEditorStore()
+  const { tool, scale, image, textBlocks, setTextBlocks, inpaintedImage, selectedBlockIndex, setSelectedBlockIndex, currentStage, pipelineStages, renderMethod } = useEditorStore()
   const containerRef = useRef<HTMLDivElement>(null)
   const inpaintLayerRef = useRef<Konva.Layer>(null)
 
@@ -95,7 +95,7 @@ function Canvas() {
               </Layer>
 
               {/* Layer 2: Rectangle fills (render mode, only for 'rectangles' and 'final' stages) */}
-              {shouldShowOverlays && (
+              {shouldShowOverlays && renderMethod === 'rectangle' && (
                 <Layer>
                   {textBlocks?.map((block, index) => {
                     if (!block.backgroundColor) return null
