@@ -3,6 +3,8 @@ use tauri::{AppHandle, Manager};
 use font_kit::source::SystemSource;
 use image::GenericImageView;
 use std::fs;
+use reqwest;
+use serde::{Deserialize, Serialize};
 
 use crate::{AppState, error::CommandResult};
 
@@ -601,4 +603,90 @@ pub async fn run_gpu_stress_test(
         target_size,
         iterations,
     })
+}
+
+// DeepL Translation API types and command
+#[derive(Debug, Serialize, Deserialize)]
+struct DeepLRequest {
+    text: Vec<String>,
+    target_lang: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_lang: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DeepLTranslation {
+    detected_source_language: Option<String>,
+    text: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DeepLResponse {
+    translations: Vec<DeepLTranslation>,
+}
+
+#[tauri::command]
+pub async fn translate_with_deepl(
+    api_key: String,
+    text: String,
+    use_pro: bool,
+    source_lang: Option<String>,
+    target_lang: Option<String>,
+) -> CommandResult<String> {
+    let base_url = if use_pro {
+        "https://api.deepl.com"
+    } else {
+        "https://api-free.deepl.com"
+    };
+
+    let url = format!("{}/v2/translate", base_url);
+
+    // Default to EN-US as recommended by DeepL docs
+    let target = target_lang.unwrap_or_else(|| "EN-US".to_string()).to_uppercase();
+
+    let request_body = DeepLRequest {
+        text: vec![text],
+        target_lang: target,
+        source_lang: source_lang.map(|s| s.to_uppercase()),
+    };
+
+    tracing::debug!("DeepL request: endpoint={}, use_pro={}, body={:?}", url, use_pro, request_body);
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("DeepL-Auth-Key {}", api_key))
+        .header("User-Agent", "Koharu/1.0")
+        .header("Content-Type", "application/json")
+        .json(&request_body)
+        .send()
+        .await
+        .context("Failed to send DeepL API request")?;
+
+    let status = response.status();
+
+    if !status.is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+
+        // Handle specific error codes
+        let error_msg = match status.as_u16() {
+            401 | 403 => "Invalid API key or insufficient permissions".to_string(),
+            429 => "Rate limit exceeded. Please wait and try again.".to_string(),
+            456 => "Quota exceeded. For DeepL Free, you've used your 500,000 character/month limit.".to_string(),
+            _ => format!("DeepL API error ({}): {}", status.as_u16(), error_text),
+        };
+
+        return Err(anyhow::anyhow!(error_msg).into());
+    }
+
+    let deepl_response: DeepLResponse = response
+        .json()
+        .await
+        .context("Failed to parse DeepL API response")?;
+
+    deepl_response
+        .translations
+        .first()
+        .map(|t| t.text.clone())
+        .ok_or_else(|| anyhow::anyhow!("DeepL returned no translations").into())
 }

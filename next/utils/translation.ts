@@ -93,13 +93,14 @@ export async function translateWithGoogle(
 }
 
 /**
- * Translate text using DeepL API
+ * Translate text using DeepL API via Tauri backend
+ * (DeepL blocks CORS, so we must use the native HTTP layer)
  *
  * @param text - Text to translate
  * @param apiKey - DeepL API key
  * @param usePro - Whether to use Pro endpoint (default: false for free tier)
  * @param sourceLang - Source language code (default: 'JA' for Japanese, null for auto-detect)
- * @param targetLang - Target language code (default: 'EN' for English)
+ * @param targetLang - Target language code (default: 'EN-US' recommended by DeepL)
  * @returns Translated text
  *
  * @throws TranslationAPIError on API errors (invalid key, rate limit, etc.)
@@ -109,7 +110,7 @@ export async function translateWithDeepL(
   apiKey: string,
   usePro = false,
   sourceLang: string | null = 'JA',
-  targetLang = 'EN'
+  targetLang = 'EN-US'
 ): Promise<string> {
   if (!text || text.trim().length === 0) {
     return text
@@ -120,51 +121,43 @@ export async function translateWithDeepL(
   }
 
   try {
-    // DeepL uses different endpoints for free vs pro tier
-    const baseUrl = usePro ? 'https://api.deepl.com' : 'https://api-free.deepl.com'
-    const url = `${baseUrl}/v2/translate`
+    // Use Tauri command to bypass CORS restrictions
+    const { invoke } = await import('@tauri-apps/api/core')
 
-    // Build request body - only include source_lang if provided
-    const requestBody: { text: string[]; target_lang: string; source_lang?: string } = {
-      text: [text],
-      target_lang: targetLang.toUpperCase(),
-    }
-
-    if (sourceLang) {
-      requestBody.source_lang = sourceLang.toUpperCase()
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `DeepL-Auth-Key ${apiKey}`,
-        'User-Agent': 'Koharu/1.0',
-      },
-      body: JSON.stringify(requestBody),
+    const result = await invoke<string>('translate_with_deepl', {
+      apiKey: apiKey.trim(),
+      text,
+      usePro,
+      sourceLang,
+      targetLang,
     })
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      const errorMessage = errorData.message || `HTTP ${response.status}: ${response.statusText}`
-
-      throw new TranslationAPIError({
-        code: response.status,
-        message: errorMessage,
-        status: response.statusText,
-      })
-    }
-
-    const data = await response.json()
-
-    if (!data.translations?.[0]?.text) {
-      throw new Error('Invalid API response format')
-    }
-
-    return data.translations[0].text
+    return result
   } catch (error) {
-    if (error instanceof TranslationAPIError) {
-      throw error
+    // Tauri invoke errors come as strings
+    if (typeof error === 'string') {
+      // Parse known error patterns
+      if (error.includes('Invalid API key') || error.includes('403') || error.includes('401')) {
+        throw new TranslationAPIError({
+          code: 403,
+          message: 'Invalid API key or insufficient permissions',
+          status: 'Forbidden',
+        })
+      } else if (error.includes('Rate limit') || error.includes('429')) {
+        throw new TranslationAPIError({
+          code: 429,
+          message: 'Rate limit exceeded. Please wait and try again.',
+          status: 'Too Many Requests',
+        })
+      } else if (error.includes('Quota exceeded') || error.includes('456')) {
+        throw new TranslationAPIError({
+          code: 456,
+          message: 'Quota exceeded. For DeepL Free, you\'ve used your 500,000 character/month limit.',
+          status: 'Quota Exceeded',
+        })
+      }
+
+      throw new Error(`DeepL translation failed: ${error}`)
     }
 
     if (error instanceof Error) {
@@ -193,9 +186,10 @@ export async function translate(
   targetLang = 'en'
 ): Promise<string> {
   if (provider === 'deepl-free' || provider === 'deepl-pro') {
-    // DeepL uses uppercase language codes
+    // DeepL: Use EN-US as recommended by DeepL docs
     const usePro = provider === 'deepl-pro'
-    return translateWithDeepL(text, apiKey, usePro, sourceLang.toUpperCase(), targetLang.toUpperCase())
+    const deeplTarget = targetLang.toLowerCase() === 'en' ? 'EN-US' : targetLang.toUpperCase()
+    return translateWithDeepL(text, apiKey, usePro, sourceLang.toUpperCase(), deeplTarget)
   } else {
     // Google uses lowercase language codes
     return translateWithGoogle(text, apiKey, sourceLang.toLowerCase(), targetLang.toLowerCase())

@@ -39,3 +39,4 @@ tracing = { version = "0.1.41", features = ["log"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 log = "0.4.27"
 font-kit = "0.14.2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
