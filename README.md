@@ -1,4 +1,6 @@
 # Koharu
+## Fork Information
+This is a fork of Koharu that adds multiple features including multiple avenues for translation (Ollama LLM/API keys), multiple methods of rendering text onto the translated image, better flexibility with text detection. This fork is still in development. More documentation soon to come. 
 
 LLM を使った自動漫画翻訳ツール。
 
@@ -49,9 +51,9 @@ The workflow of translation consists of the following steps:
 
 - [x] Detect the text in the manga using a text detection model. ✅ **Working**
 - [x] Extract the detected text using an OCR model. ✅ **Working**
-- [ ] Translate the extracted text using an LLM. ⚠️ **In Progress**
-- [ ] Inpaint the translated text back into the manga using an inpainting model. ⚠️ **Backend Ready, UI Missing**
-- [ ] Render translated text onto inpainted image. ❌ **Not Implemented**
+- [x] Translate the extracted text using a local LLM (Ollama), Google Translation API or DeepL API Key. ✅ **Working**
+- [x] Place the translated text back into the manga. ✅ **Working**
+- [x] Render translated text onto inpainted image. ✅ **Working**
 
 ## Models
 
