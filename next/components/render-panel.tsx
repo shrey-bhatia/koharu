@@ -10,8 +10,8 @@ import { calculateOptimalFontSize } from '@/utils/font-sizing'
 import { calculateImprovedFontSize } from '@/utils/improved-font-sizing'
 import { createImageFromBuffer } from '@/lib/image'
 import { invoke } from '@tauri-apps/api/core'
+import { fileSave } from 'browser-fs-access'
 import RenderCustomization from './render-customization'
-import { renderTextWithKonva } from '@/utils/konva-text-render'
 
 // Utility function for creating canvas with OffscreenCanvas fallback
 function createCanvas(width: number, height: number): { canvas: HTMLCanvasElement | OffscreenCanvas, ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D } {
@@ -225,15 +225,14 @@ export default function RenderPanel() {
         console.log('[EXPORT] Using existing final stage for export')
         // Use existing final stage for export
         const blob = new Blob([existingFinalStage.buffer], { type: 'image/png' })
-        const url = URL.createObjectURL(blob)
         
-        // Trigger download
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `translated-manga-${Date.now()}.png`
-        a.click()
-
-        URL.revokeObjectURL(url)
+        // Use browser-fs-access for cross-platform file save (works in browser and Tauri)
+        await fileSave(blob, {
+          fileName: `translated-manga-${Date.now()}.png`,
+          extensions: ['.png'],
+          description: 'PNG Image',
+        })
+        
         console.log('Image exported successfully (using existing final composition)!')
         return
       }
@@ -243,8 +242,10 @@ export default function RenderPanel() {
       if (!image) return
 
       try {
+        console.log('[EXPORT] Creating canvas:', image.bitmap.width, 'x', image.bitmap.height)
         // Create canvas at original resolution using utility function
         const { canvas, ctx } = createCanvas(image.bitmap.width, image.bitmap.height)
+        console.log('[EXPORT] Canvas created, type:', canvas.constructor.name, 'Context type:', ctx.constructor.name)
 
         // Determine base image based on render method
         let baseImage: ImageBitmap
@@ -279,7 +280,19 @@ export default function RenderPanel() {
 
             ctx.fillStyle = `rgb(${bg.r}, ${bg.g}, ${bg.b})`
             ctx.beginPath()
-            ctx.roundRect(x, y, width, height, radius)
+            
+            // Draw rounded rect manually (roundRect not universally supported)
+            ctx.moveTo(x + radius, y)
+            ctx.lineTo(x + width - radius, y)
+            ctx.quadraticCurveTo(x + width, y, x + width, y + radius)
+            ctx.lineTo(x + width, y + height - radius)
+            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height)
+            ctx.lineTo(x + radius, y + height)
+            ctx.quadraticCurveTo(x, y + height, x, y + height - radius)
+            ctx.lineTo(x, y + radius)
+            ctx.quadraticCurveTo(x, y, x + radius, y)
+            ctx.closePath()
+            
             ctx.fill()
           }
         } else {
@@ -292,28 +305,148 @@ export default function RenderPanel() {
         const rectanglesStage = await createImageFromBuffer(rectanglesBuffer)
         setPipelineStage('withRectangles', rectanglesStage)
 
-        // 3. Draw translated text using Konva for consistent, high-quality rendering
-        console.log(`[EXPORT] Drawing text for ${textBlocks.length} blocks using Konva`)
+        // 3. Draw translated text with Canvas 2D API (simple and reliable)
+        console.log(`[EXPORT] Drawing text for ${textBlocks.length} blocks using Canvas 2D`)
+        console.log(`[EXPORT] Text blocks:`, textBlocks.map(b => ({ 
+          text: b.translatedText?.substring(0, 20), 
+          fontSize: b.fontSize, 
+          hasColor: !!b.textColor 
+        })))
+        
+        for (const block of textBlocks) {
+          if (!block.translatedText || !block.fontSize || !block.textColor) {
+            console.log('[EXPORT] Skipping block:', { hasText: !!block.translatedText, hasFontSize: !!block.fontSize, hasColor: !!block.textColor })
+            continue
+          }
 
-        // Use Konva for text rendering (replaces problematic Canvas 2D text rendering)
-        await renderTextWithKonva(canvas, textBlocks, { debug: true })
+          const textColor = block.manualTextColor || block.textColor
+          const fontFamily = block.fontFamily || defaultFont
+          const fontWeight = block.fontWeight || 'normal'
+          const fontStretch = block.fontStretch || 'normal'
+          const letterSpacing = block.letterSpacing || 0
+          const lineHeightMultiplier = block.lineHeight || 1.2
+
+          console.log(`[EXPORT] Drawing block:`, block.translatedText.substring(0, 30), 'font:', fontFamily, 'size:', block.fontSize)
+          ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+
+          // Configure outline if available from appearance analysis
+          const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
+          if (hasOutline) {
+            ctx.strokeStyle = `rgb(${block.appearance.sourceOutlineColor.r}, ${block.appearance.sourceOutlineColor.g}, ${block.appearance.sourceOutlineColor.b})`
+            ctx.lineWidth = block.appearance.outlineWidthPx
+            ctx.lineJoin = 'round'
+            ctx.miterLimit = 2
+          }
+
+          ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
+
+          const boxWidth = block.xmax - block.xmin
+          const boxHeight = block.ymax - block.ymin
+          const maxWidth = boxWidth * 0.9 // 10% padding
+          const centerX = (block.xmin + block.xmax) / 2
+          const centerY = (block.ymin + block.ymax) / 2
+
+          // Helper function to measure text width with manual letter spacing
+          const measureTextWithSpacing = (text: string): number => {
+            if (letterSpacing === 0) {
+              return ctx.measureText(text).width
+            }
+            let totalWidth = 0
+            for (let i = 0; i < text.length; i++) {
+              totalWidth += ctx.measureText(text[i]).width
+              if (i < text.length - 1) totalWidth += letterSpacing
+            }
+            return totalWidth
+          }
+
+          // Helper function to draw text with manual letter spacing
+          const drawTextWithSpacing = (text: string, x: number, y: number, isStroke: boolean = false) => {
+            if (letterSpacing === 0) {
+              // Simple case: no letter spacing, use normal text rendering
+              if (isStroke) {
+                ctx.strokeText(text, x, y, maxWidth)
+              } else {
+                ctx.fillText(text, x, y, maxWidth)
+              }
+              return
+            }
+            
+            // Complex case: manual letter spacing
+            const totalWidth = measureTextWithSpacing(text)
+            let currentX = x - totalWidth / 2
+            
+            for (let i = 0; i < text.length; i++) {
+              const char = text[i]
+              const charWidth = ctx.measureText(char).width
+              const charCenterX = currentX + charWidth / 2
+              
+              if (isStroke) {
+                ctx.strokeText(char, charCenterX, y)
+              } else {
+                ctx.fillText(char, charCenterX, y)
+              }
+              
+              currentX += charWidth + letterSpacing
+            }
+          }
+
+          // Wrap text to fit within box width
+          const words = block.translatedText.split(' ')
+          const lines: string[] = []
+          let currentLine = ''
+
+          for (const word of words) {
+            const testLine = currentLine + (currentLine ? ' ' : '') + word
+            const testWidth = measureTextWithSpacing(testLine)
+
+            if (testWidth > maxWidth && currentLine !== '') {
+              lines.push(currentLine)
+              currentLine = word
+            } else {
+              currentLine = testLine
+            }
+          }
+          if (currentLine) lines.push(currentLine)
+
+          const lineHeight = block.fontSize * lineHeightMultiplier
+          const totalHeight = lines.length * lineHeight
+
+          // Start from top if text is too tall, otherwise center vertically
+          const startY = totalHeight > boxHeight * 0.9
+            ? block.ymin + lineHeight / 2
+            : centerY - ((lines.length - 1) * lineHeight) / 2
+
+          lines.forEach((line, i) => {
+            const y = startY + i * lineHeight
+
+            // Draw outline first (if present)
+            if (hasOutline) {
+              drawTextWithSpacing(line, centerX, y, true) // true = stroke
+            }
+
+            // Then draw fill on top
+            drawTextWithSpacing(line, centerX, y, false) // false = fill
+          })
+        }
 
         // 4. Save final stage and export as PNG
+        console.log('[EXPORT] Converting canvas to blob...')
         const finalBlob = await canvasToBlob(canvas, { type: 'image/png', quality: 1.0 })
+        console.log('[EXPORT] Blob created, size:', finalBlob.size, 'bytes')
         const finalBuffer = await finalBlob.arrayBuffer()
         const finalStage = await createImageFromBuffer(finalBuffer)
         setPipelineStage('final', finalStage)
         setCurrentStage('final')
 
-        const url = URL.createObjectURL(finalBlob)
-
-        // 5. Trigger download
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `translated-manga-${Date.now()}.png`
-        a.click()
-
-        URL.revokeObjectURL(url)
+        // 5. Save file using browser-fs-access (works in browser and Tauri)
+        console.log('[EXPORT] Opening save dialog...')
+        await fileSave(finalBlob, {
+          fileName: `translated-manga-${Date.now()}.png`,
+          extensions: ['.png'],
+          description: 'PNG Image',
+        })
 
         console.log('Image exported successfully!')
       } catch (err) {
@@ -370,16 +503,139 @@ export default function RenderPanel() {
 
           ctx.fillStyle = `rgb(${bg.r}, ${bg.g}, ${bg.b})`
           ctx.beginPath()
-          ctx.roundRect(x, y, width, height, radius)
+          
+          // Draw rounded rect manually (roundRect not universally supported)
+          ctx.moveTo(x + radius, y)
+          ctx.lineTo(x + width - radius, y)
+          ctx.quadraticCurveTo(x + width, y, x + width, y + radius)
+          ctx.lineTo(x + width, y + height - radius)
+          ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height)
+          ctx.lineTo(x + radius, y + height)
+          ctx.quadraticCurveTo(x, y + height, x, y + height - radius)
+          ctx.lineTo(x, y + radius)
+          ctx.quadraticCurveTo(x, y, x + radius, y)
+          ctx.closePath()
+          
           ctx.fill()
         }
       }
 
-        // 3. Draw translated text using Konva for consistent, high-quality rendering
-        console.log(`[FINAL_COMP] Drawing text for ${textBlocks.length} blocks using Konva`)
+      // 3. Draw translated text with Canvas 2D API (simple and reliable)
+      console.log(`[FINAL_COMP] Drawing text for ${textBlocks.length} blocks using Canvas 2D`)
+      
+      for (const block of textBlocks) {
+        if (!block.translatedText || !block.fontSize || !block.textColor) continue
 
-        // Use Konva for text rendering (replaces problematic Canvas 2D text rendering)
-        await renderTextWithKonva(canvas, textBlocks, { debug: true })
+        const textColor = block.manualTextColor || block.textColor
+        const fontFamily = block.fontFamily || defaultFont
+        const fontWeight = block.fontWeight || 'normal'
+        const fontStretch = block.fontStretch || 'normal'
+        const letterSpacing = block.letterSpacing || 0
+        const lineHeightMultiplier = block.lineHeight || 1.2
+
+        ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+
+        // Configure outline if available from appearance analysis
+        const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
+        if (hasOutline) {
+          ctx.strokeStyle = `rgb(${block.appearance.sourceOutlineColor.r}, ${block.appearance.sourceOutlineColor.g}, ${block.appearance.sourceOutlineColor.b})`
+          ctx.lineWidth = block.appearance.outlineWidthPx
+          ctx.lineJoin = 'round'
+          ctx.miterLimit = 2
+        }
+
+        ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
+
+        const boxWidth = block.xmax - block.xmin
+        const boxHeight = block.ymax - block.ymin
+        const maxWidth = boxWidth * 0.9 // 10% padding
+        const centerX = (block.xmin + block.xmax) / 2
+        const centerY = (block.ymin + block.ymax) / 2
+
+        // Helper function to measure text width with manual letter spacing
+        const measureTextWithSpacing = (text: string): number => {
+          if (letterSpacing === 0) {
+            return ctx.measureText(text).width
+          }
+          let totalWidth = 0
+          for (let i = 0; i < text.length; i++) {
+            totalWidth += ctx.measureText(text[i]).width
+            if (i < text.length - 1) totalWidth += letterSpacing
+          }
+          return totalWidth
+        }
+
+        // Helper function to draw text with manual letter spacing
+        const drawTextWithSpacing = (text: string, x: number, y: number, isStroke: boolean = false) => {
+          if (letterSpacing === 0) {
+            // Simple case: no letter spacing, use normal text rendering
+            if (isStroke) {
+              ctx.strokeText(text, x, y, maxWidth)
+            } else {
+              ctx.fillText(text, x, y, maxWidth)
+            }
+            return
+          }
+          
+          // Complex case: manual letter spacing
+          const totalWidth = measureTextWithSpacing(text)
+          let currentX = x - totalWidth / 2
+          
+          for (let i = 0; i < text.length; i++) {
+            const char = text[i]
+            const charWidth = ctx.measureText(char).width
+            const charCenterX = currentX + charWidth / 2
+            
+            if (isStroke) {
+              ctx.strokeText(char, charCenterX, y)
+            } else {
+              ctx.fillText(char, charCenterX, y)
+            }
+            
+            currentX += charWidth + letterSpacing
+          }
+        }
+
+        // Wrap text to fit within box width
+        const words = block.translatedText.split(' ')
+        const lines: string[] = []
+        let currentLine = ''
+
+        for (const word of words) {
+          const testLine = currentLine + (currentLine ? ' ' : '') + word
+          const testWidth = measureTextWithSpacing(testLine)
+
+          if (testWidth > maxWidth && currentLine !== '') {
+            lines.push(currentLine)
+            currentLine = word
+          } else {
+            currentLine = testLine
+          }
+        }
+        if (currentLine) lines.push(currentLine)
+
+        const lineHeight = block.fontSize * lineHeightMultiplier
+        const totalHeight = lines.length * lineHeight
+
+        // Start from top if text is too tall, otherwise center vertically
+        const startY = totalHeight > boxHeight * 0.9
+          ? block.ymin + lineHeight / 2
+          : centerY - ((lines.length - 1) * lineHeight) / 2
+
+        lines.forEach((line, i) => {
+          const y = startY + i * lineHeight
+
+          // Draw outline first (if present)
+          if (hasOutline) {
+            drawTextWithSpacing(line, centerX, y, true) // true = stroke
+          }
+
+          // Then draw fill on top
+          drawTextWithSpacing(line, centerX, y, false) // false = fill
+        })
+      }
 
       // Save final stage
       const finalBlob = await canvasToBlob(canvas, { type: 'image/png', quality: 1.0 })
