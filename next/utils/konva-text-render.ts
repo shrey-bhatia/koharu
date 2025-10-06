@@ -28,8 +28,10 @@ export interface TextBlock {
  * Renders text blocks using Konva.js for consistent, high-quality text rendering
  * that matches the live preview exactly.
  */
+type RenderTargetCanvas = HTMLCanvasElement | OffscreenCanvas
+
 export async function renderTextWithKonva(
-  canvas: HTMLCanvasElement,
+  canvas: RenderTargetCanvas,
   textBlocks: StateTextBlock[],
   options: {
     scale?: number
@@ -38,11 +40,24 @@ export async function renderTextWithKonva(
 ): Promise<void> {
   const { scale = 1, debug = false } = options
 
+  const width = canvas.width
+  const height = canvas.height
+
+  // CRITICAL FIX: Konva requires a DOM-attached container for proper rendering
+  // Create a temporary container and attach it to the document body
+  const tempContainer = document.createElement('div')
+  tempContainer.style.position = 'absolute'
+  tempContainer.style.top = '-9999px'
+  tempContainer.style.left = '-9999px'
+  tempContainer.style.width = `${width}px`
+  tempContainer.style.height = `${height}px`
+  document.body.appendChild(tempContainer)
+
   // Create a Konva stage that matches our canvas dimensions
   const stage = new Konva.Stage({
-    container: document.createElement('div'), // Dummy container
-    width: canvas.width,
-    height: canvas.height,
+    container: tempContainer, // Use DOM-attached container
+    width,
+    height,
   })
 
   // Create a layer for text rendering
@@ -51,7 +66,7 @@ export async function renderTextWithKonva(
 
   // Render each text block
   for (const block of textBlocks) {
-    if (!block.translatedText || !block.fontSize || !block.textColor) {
+    if (!block.translatedText || !block.fontSize || (!block.textColor && !block.manualTextColor)) {
       if (debug) console.log(`[KONVA] Skipping block - missing text or styling`)
       continue
     }
@@ -60,23 +75,16 @@ export async function renderTextWithKonva(
 
     const textColor = block.manualTextColor || block.textColor
     const fontFamily = block.fontFamily || 'Arial'
-    const fontWeight = block.fontWeight || 'normal'
-    const fontStretch = block.fontStretch || 'normal'
-    const letterSpacing = block.letterSpacing || 0
-    const lineHeight = block.lineHeight || 1.2
-
     const boxWidth = block.xmax - block.xmin
     const boxHeight = block.ymax - block.ymin
-    const maxWidth = boxWidth * 0.9 // 10% padding
-    const centerX = (block.xmin + block.xmax) / 2
-    const centerY = (block.ymin + block.ymax) / 2
 
     // Configure outline if available
     const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
     const outlineColor = hasOutline ? block.appearance.sourceOutlineColor : undefined
     const outlineWidth = hasOutline ? block.appearance.outlineWidthPx : undefined
 
-    // Create Konva Text configuration
+    // CRITICAL FIX: Match EXACTLY what the live preview uses
+    // Both preview and export must use identical properties for consistent rendering
     const textConfig: TextConfig = {
       x: block.xmin,
       y: block.ymin,
@@ -85,16 +93,20 @@ export async function renderTextWithKonva(
       text: block.translatedText,
       fontSize: block.fontSize,
       fontFamily,
-      fontStyle: typeof fontWeight === 'number' ? fontWeight.toString() : fontWeight,
-      fontVariant: fontStretch,
-      letterSpacing,
       fill: `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`,
       align: 'center',
       verticalAlign: 'middle',
       wrap: 'word',
-      lineHeight,
       listening: false, // No interaction needed for export
       perfectDrawEnabled: false, // Better performance for export
+    }
+
+    // Only add optional properties if they're defined
+    if (block.letterSpacing !== undefined) {
+      textConfig.letterSpacing = block.letterSpacing
+    }
+    if (block.lineHeight !== undefined) {
+      textConfig.lineHeight = block.lineHeight
     }
 
     // Add stroke configuration if outline is present
@@ -110,16 +122,60 @@ export async function renderTextWithKonva(
   }
 
   // Render the Konva layer to our canvas
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Failed to get canvas context')
+  const ctx = canvas.getContext('2d') as
+    | CanvasRenderingContext2D
+    | OffscreenCanvasRenderingContext2D
+    | null
+  if (!ctx) {
+    stage.destroy()
+    document.body.removeChild(tempContainer)
+    throw new Error('Failed to get canvas context')
+  }
 
-  // Draw the Konva layer to our canvas
-  layer.draw()
-  const konvaCanvas = layer.getCanvas()._canvas
-  ctx.drawImage(konvaCanvas, 0, 0)
+  try {
+    // CRITICAL FIX: Ensure layer is fully drawn before converting
+    await new Promise<void>((resolve) => {
+      layer.draw()
+      // Wait for next frame to ensure fonts are loaded
+      requestAnimationFrame(() => resolve())
+    })
 
-  // Clean up
-  stage.destroy()
+    if (debug) console.log('[KONVA] Layer drawn, converting to canvas...')
+
+    // CRITICAL FIX: toCanvas() can return HTMLCanvasElement or Promise<HTMLCanvasElement>
+    // Get the rendered canvas from Konva
+    const konvaCanvasResult = stage.toCanvas({ pixelRatio: scale })
+    const konvaCanvas = konvaCanvasResult instanceof Promise ? await konvaCanvasResult : konvaCanvasResult
+
+    if (debug) console.log('[KONVA] Canvas obtained, drawing to target...')
+
+    // Draw the Konva-rendered canvas onto our target canvas
+    if (canvas instanceof OffscreenCanvas) {
+      // For OffscreenCanvas, use ImageBitmap
+      const bitmap = await createImageBitmap(konvaCanvas)
+      ctx.save()
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.drawImage(bitmap, 0, 0, width, height)
+      ctx.restore()
+      bitmap.close()
+      if (debug) console.log('[KONVA] Text rendered to OffscreenCanvas')
+    } else {
+      // For regular HTMLCanvasElement, draw directly
+      ctx.save()
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.drawImage(konvaCanvas, 0, 0, width, height)
+      ctx.restore()
+      if (debug) console.log('[KONVA] Text rendered to HTMLCanvasElement')
+    }
+  } catch (error) {
+    console.error('[KONVA] Rendering error:', error)
+    throw error
+  } finally {
+    // Clean up: destroy stage and remove temporary container
+    stage.destroy()
+    document.body.removeChild(tempContainer)
+    if (debug) console.log('[KONVA] Cleanup complete')
+  }
 }
 
 /**

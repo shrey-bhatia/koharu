@@ -11,7 +11,7 @@ import { calculateImprovedFontSize } from '@/utils/improved-font-sizing'
 import { createImageFromBuffer } from '@/lib/image'
 import { invoke } from '@tauri-apps/api/core'
 import RenderCustomization from './render-customization'
-import { renderTextWithKonva, konvaTextToCanvas } from '@/utils/konva-text-render'
+import { renderTextWithKonva } from '@/utils/konva-text-render'
 
 // Utility function for creating canvas with OffscreenCanvas fallback
 function createCanvas(width: number, height: number): { canvas: HTMLCanvasElement | OffscreenCanvas, ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D } {
@@ -294,9 +294,9 @@ export default function RenderPanel() {
 
         // 3. Draw translated text using Konva for consistent, high-quality rendering
         console.log(`[EXPORT] Drawing text for ${textBlocks.length} blocks using Konva`)
-        
+
         // Use Konva for text rendering (replaces problematic Canvas 2D text rendering)
-        await renderTextWithKonva(canvas as HTMLCanvasElement, textBlocks, { debug: true })
+        await renderTextWithKonva(canvas, textBlocks, { debug: true })
 
         // 4. Save final stage and export as PNG
         const finalBlob = await canvasToBlob(canvas, { type: 'image/png', quality: 1.0 })
@@ -375,11 +375,11 @@ export default function RenderPanel() {
         }
       }
 
-      // 3. Draw translated text using Konva for consistent, high-quality rendering
-      console.log(`[FINAL_COMP] Drawing text for ${textBlocks.length} blocks using Konva`)
-      
-      // Use Konva for text rendering (replaces problematic Canvas 2D text rendering)
-      await renderTextWithKonva(canvas as HTMLCanvasElement, textBlocks, { debug: true })
+        // 3. Draw translated text using Konva for consistent, high-quality rendering
+        console.log(`[FINAL_COMP] Drawing text for ${textBlocks.length} blocks using Konva`)
+
+        // Use Konva for text rendering (replaces problematic Canvas 2D text rendering)
+        await renderTextWithKonva(canvas, textBlocks, { debug: true })
 
       // Save final stage
       const finalBlob = await canvasToBlob(canvas, { type: 'image/png', quality: 1.0 })

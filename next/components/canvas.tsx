@@ -147,6 +147,8 @@ function Canvas() {
                         fill={`rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`}
                         stroke={outlineColor ? `rgb(${outlineColor.r}, ${outlineColor.g}, ${outlineColor.b})` : undefined}
                         strokeWidth={outlineWidth}
+                        letterSpacing={block.letterSpacing}
+                        lineHeight={block.lineHeight}
                         align='center'
                         verticalAlign='middle'
                         wrap='word'
