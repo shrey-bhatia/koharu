@@ -4,7 +4,8 @@
 use image::{DynamicImage, Rgba, RgbaImage};
 use imageproc::drawing::{draw_filled_rect_mut, draw_text_mut};
 use imageproc::rect::Rect as IpRect;
-use ab_glyph::{FontArc, PxScale};
+use ab_glyph::{FontArc, PxScale, Font, ScaleFont};
+use glyph_brush_layout::{Layout, SectionGeometry, SectionText, FontId, GlyphPositioner};
 use serde::Deserialize;
 use font_kit::source::SystemSource;
 use font_kit::family_name::FamilyName;
@@ -370,19 +371,36 @@ fn draw_text_block(
     Ok(())
 }
 
-/// Measure text width without letter spacing
+/// Measure text width without letter spacing (using glyph_brush_layout for proper kerning)
 fn measure_text_width(text: &str, font: &FontArc, scale: PxScale) -> f32 {
-    use ab_glyph::{Font, ScaleFont};
-    
-    let scaled_font = font.as_scaled(scale);
-    let mut width = 0.0;
-    
-    for c in text.chars() {
-        let glyph_id = font.glyph_id(c);
-        width += scaled_font.h_advance(glyph_id);
+    if text.is_empty() {
+        return 0.0;
     }
     
-    width
+    let layout = Layout::default_wrap();
+    let fonts = &[font];
+    
+    // Create a minimal section for measurement
+    let section = SectionText {
+        text,
+        scale: scale.into(),
+        font_id: FontId(0),
+    };
+    
+    let geometry = SectionGeometry::default();
+    let glyphs = layout.calculate_glyphs(fonts, &geometry, &[section]);
+    
+    // Find the rightmost glyph position + advance to get total width
+    let mut max_x = 0.0;
+    for section_glyph in glyphs {
+        let scaled_font = font.as_scaled(scale);
+        let glyph_x = section_glyph.glyph.position.x + 
+                     scaled_font.h_advance(section_glyph.glyph.id);
+        if glyph_x > max_x {
+            max_x = glyph_x;
+        }
+    }
+    max_x
 }
 
 /// Measure text width with manual letter spacing (matches JS logic)
