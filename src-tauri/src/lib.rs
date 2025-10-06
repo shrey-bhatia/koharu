@@ -1,6 +1,7 @@
 mod commands;
 mod error;
 mod state;
+mod text_renderer;
 
 use comic_text_detector::ComicTextDetector;
 use lama::Lama;
@@ -11,7 +12,11 @@ use tokio::sync::Mutex;
 use std::fs;
 
 use crate::{
-    commands::{detection, ocr, get_system_fonts, inpaint_region, set_gpu_preference, get_gpu_devices, get_current_gpu_status, run_gpu_stress_test, translate_with_deepl, translate_with_ollama},
+    commands::{
+        detection, ocr, get_system_fonts, inpaint_region, set_gpu_preference,
+        get_gpu_devices, get_current_gpu_status, run_gpu_stress_test,
+        translate_with_deepl, translate_with_ollama, render_and_export_image
+    },
     state::{AppState, GpuInitResult},
 };
 
@@ -274,7 +279,19 @@ pub fn run() -> anyhow::Result<()> {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![detection, ocr, get_system_fonts, inpaint_region, set_gpu_preference, get_gpu_devices, get_current_gpu_status, run_gpu_stress_test, translate_with_deepl, translate_with_ollama])
+        .invoke_handler(tauri::generate_handler![
+            detection,
+            ocr,
+            get_system_fonts,
+            inpaint_region,
+            set_gpu_preference,
+            get_gpu_devices,
+            get_current_gpu_status,
+            run_gpu_stress_test,
+            translate_with_deepl,
+            translate_with_ollama,
+            render_and_export_image
+        ])
         .run(tauri::generate_context!())?;
 
     Ok(())
