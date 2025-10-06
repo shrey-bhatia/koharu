@@ -1,6 +1,6 @@
 'use client'
 
-import { Image, Moon, Sun } from 'lucide-react'
+import { Image, Moon, Sun, Clipboard } from 'lucide-react'
 import { Button, IconButton, Badge } from '@radix-ui/themes'
 import { fileOpen } from 'browser-fs-access'
 import { useEditorStore } from '@/lib/state'
@@ -27,6 +27,33 @@ function Topbar() {
     }
   }
 
+  const handlePasteImage = async () => {
+    try {
+      const clipboardItems = await navigator.clipboard.read()
+      let blob: Blob | null = null
+
+      for (const item of clipboardItems) {
+        for (const type of item.types) {
+          if (type.startsWith('image/')) {
+            blob = await item.getType(type)
+            break
+          }
+        }
+        if (blob) break
+      }
+
+      if (!blob) {
+        alert('No image found in clipboard.')
+        return
+      }
+
+      const image = await createImageFromBlob(blob)
+      setImage(image)
+    } catch (err) {
+      alert(`Error pasting image: ${err}`)
+    }
+  }
+
   const stageLabels = {
     original: 'Original',
     textless: 'Textless',
@@ -39,6 +66,9 @@ function Topbar() {
       <div className='mx-1 flex items-center'>
         <Button onClick={handleOpenImage} variant='soft'>
           <Image size={20} />
+        </Button>
+        <Button onClick={handlePasteImage} variant='soft'>
+          <Clipboard size={20} />
         </Button>
       </div>
 
