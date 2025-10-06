@@ -236,7 +236,20 @@ export const useEditorStore = create(
       defaultFont: string
     },
     (set) => ({
-      setImage: (image: Image | null) => set({ image }),
+      setImage: (image: Image | null) => set({
+        image,
+        currentStage: 'original',
+        pipelineStages: {
+          original: null,
+          textless: null,
+          withRectangles: null,
+          final: null,
+        },
+        textBlocks: [],
+        segmentationMask: null,
+        inpaintedImage: null,
+        selectedBlockIndex: null,
+      }),
       setTool: (tool: string) => set({ tool }),
       setScale: (scale: number) => set({ scale }),
       setTextBlocks: (textBlocks: TextBlock[]) => set({ textBlocks }),
