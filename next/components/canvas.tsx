@@ -1,7 +1,7 @@
 'use client'
 
 import type Konva from 'konva'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   Circle,
   Image,
@@ -21,6 +21,11 @@ function Canvas() {
 
   const [selected, setSelected] = useState<any>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
+
+  useEffect(() => {
+    transformerRef.current?.nodes(selected ? [selected] : [])
+    transformerRef.current?.getLayer()?.batchDraw()
+  }, [selected])
 
   // Handler for when a box is transformed (scaled/rotated/resized)
   const handleTransformEnd = (index: number) => {
