@@ -90,21 +90,40 @@ pub fn render_text_on_image(
         tracing::info!("[RUST_EXPORT] Skipping rectangles for LaMa/NewLaMa mode");
     }
 
-    // Step 2: Draw debug text in 4 corners with different methods
+    // Step 2: Draw debug text in 4 corners using actual textBlocks data
     let (width, height) = img.dimensions();
-    let debug_text = "DEBUG TEXT";
 
-    // Method 1: Red text in top-left (current method)
-    draw_debug_text_method1(&mut img, &font, debug_text, width, height)?;
+    // Debug: Log what we're receiving
+    tracing::info!("[DEBUG] Received {} text blocks", text_blocks.len());
+    for (i, block) in text_blocks.iter().enumerate() {
+        tracing::info!("[DEBUG] Block {}: translated_text='{}', font_size={:?}, text_color={:?}",
+            i,
+            block.translated_text.as_ref().unwrap_or(&"NULL".to_string()),
+            block.font_size,
+            block.text_color
+        );
+    }
 
-    // Method 2: Black text in top-right (simple draw_text_mut)
-    draw_debug_text_method2(&mut img, &font, debug_text, width, height)?;
+    // Use first text block if available, otherwise use fallback
+    let debug_text = if let Some(first_block) = text_blocks.first() {
+        first_block.translated_text.as_ref()
+            .map(|s| s.as_str())
+            .unwrap_or("NO_TRANSLATED_TEXT")
+    } else {
+        "NO_TEXT_BLOCKS"
+    };
 
-    // Method 3: Yellow text in bottom-left (different scaling)
-    draw_debug_text_method3(&mut img, &font, debug_text, width, height)?;
+    // Method 1: Red text in top-left (DATA FLOW DIAGNOSIS)
+    draw_debug_text_method1(&mut img, &font, debug_text, width, height, text_blocks.first(), text_blocks.len())?;
 
-    // Method 4: Blue text in bottom-right (character-by-character)
-    draw_debug_text_method4(&mut img, &font, debug_text, width, height)?;
+    // Method 2: Black text in top-right (CONTENT ANALYSIS)
+    draw_debug_text_method2(&mut img, &font, debug_text, width, height, text_blocks.first())?;
+
+    // Method 3: Yellow text in bottom-left (SERIALIZATION CHECK)
+    draw_debug_text_method3(&mut img, &font, debug_text, width, height, text_blocks.first())?;
+
+    // Method 4: Blue text in bottom-right (FEATURE SUPPORT TEST)
+    draw_debug_text_method4(&mut img, &font, debug_text, width, height, text_blocks.first())?;
 
     // Step 3: Draw translated text (original logic)
     tracing::info!("[RUST_EXPORT] Drawing text for {} blocks", text_blocks.len());
@@ -447,58 +466,107 @@ fn draw_text_with_spacing_and_outline(
     }
 }
 
-// Debug methods for testing different rendering approaches
-// Method 1: Red text in top-left (using current draw_text_block approach)
+// Debug methods for testing different rendering approaches with real data
+// Method 1: Red text in top-left (DATA FLOW DIAGNOSIS)
 fn draw_debug_text_method1(
     img: &mut RgbaImage,
     font: &FontArc,
     text: &str,
     img_width: u32,
     img_height: u32,
+    text_block: Option<&TextBlock>,
+    text_blocks_len: usize,
 ) -> anyhow::Result<()> {
-    let scale = PxScale::from(24.0);
+    let scale = PxScale::from(16.0);
     let x = 20;
     let y = 30;
     let color = Rgba([255, 0, 0, 255]); // Red
-    
-    draw_text_mut(img, color, x, y, scale, font, text);
+
+    // Show comprehensive data flow diagnosis
+    let display_text = if text_blocks_len > 0 {
+        if let Some(block) = text_block {
+            let has_translated = block.translated_text.is_some();
+            let text_len = block.translated_text.as_ref().map(|s| s.len()).unwrap_or(0);
+            let text_preview = block.translated_text.as_ref()
+                .map(|s| s.chars().take(15).collect::<String>())
+                .unwrap_or("NULL".to_string());
+            format!("BLOCKS:{} HAS_TEXT:{} LEN:{} PREV:'{}'",
+                text_blocks_len, has_translated, text_len, text_preview)
+        } else {
+            format!("BLOCKS:{} BUT_NO_FIRST_BLOCK", text_blocks_len)
+        }
+    } else {
+        "BLOCKS:0_NO_DATA_RECEIVED".to_string()
+    };
+
+    draw_text_mut(img, color, x, y, scale, font, &display_text);
     Ok(())
 }
 
-// Method 2: Black text in top-right (simple draw_text_mut)
+// Method 2: Black text in top-right (CONTENT ANALYSIS)
 fn draw_debug_text_method2(
     img: &mut RgbaImage,
     font: &FontArc,
     text: &str,
     img_width: u32,
     img_height: u32,
+    text_block: Option<&TextBlock>,
 ) -> anyhow::Result<()> {
-    let scale = PxScale::from(24.0);
-    let text_width = measure_text_width(text, font, scale);
+    let scale = PxScale::from(16.0);
+    let color = Rgba([0, 0, 0, 255]); // Black
+
+    // Show content analysis
+    let display_text = if let Some(block) = text_block {
+        let text_len = block.translated_text.as_ref().map(|s| s.len()).unwrap_or(0);
+        let has_color = block.text_color.is_some();
+        let has_bg = block.background_color.is_some();
+        let font_size = block.font_size.unwrap_or(0.0);
+        format!("LEN:{} COLOR:{} BG:{} SIZE:{:.0}",
+            text_len, has_color, has_bg, font_size)
+    } else {
+        "NO_BLOCK_DATA".to_string()
+    };
+
+    let text_width = measure_text_width(&display_text, font, scale);
     let x = (img_width as i32) - (text_width as i32) - 20;
     let y = 30;
-    let color = Rgba([0, 0, 0, 255]); // Black
-    
-    draw_text_mut(img, color, x, y, scale, font, text);
+
+    draw_text_mut(img, color, x, y, scale, font, &display_text);
     Ok(())
 }
 
-// Method 3: Yellow text in bottom-left (different scaling approach)
+// Method 3: Yellow text in bottom-left (SERIALIZATION CHECK)
 fn draw_debug_text_method3(
     img: &mut RgbaImage,
     font: &FontArc,
     text: &str,
     img_width: u32,
     img_height: u32,
+    text_block: Option<&TextBlock>,
 ) -> anyhow::Result<()> {
-    let scale = PxScale::from(20.0);
+    let scale = PxScale::from(16.0);
     let x = 20;
     let y = (img_height as i32) - 50;
     let color = Rgba([255, 255, 0, 255]); // Yellow
-    
+
+    // Show serialization check
+    let display_text = if let Some(block) = text_block {
+        let has_appearance = block.appearance.is_some();
+        let has_outline = block.appearance.as_ref()
+            .and_then(|a| a.source_outline_color.as_ref()).is_some();
+        let outline_width = block.appearance.as_ref()
+            .and_then(|a| a.outline_width_px).unwrap_or(0.0);
+        let has_weight = block.font_weight.is_some();
+        let has_stretch = block.font_stretch.is_some();
+        format!("APPEAR:{} OUTLINE:{} W:{:.0} WEIGHT:{} STRETCH:{}",
+            has_appearance, has_outline, outline_width, has_weight, has_stretch)
+    } else {
+        "NO_BLOCK_DATA".to_string()
+    };
+
     // Draw background rectangle first
     for dy in 0..30 {
-        for dx in 0..200 {
+        for dx in 0..300 {
             let px = x + dx;
             let py = y + dy;
             if px < img_width as i32 && py < img_height as i32 && px >= 0 && py >= 0 {
@@ -506,32 +574,40 @@ fn draw_debug_text_method3(
             }
         }
     }
-    
-    draw_text_mut(img, color, x, y, scale, font, text);
+
+    draw_text_mut(img, color, x, y, scale, font, &display_text);
     Ok(())
 }
 
-// Method 4: Blue text in bottom-right (character-by-character drawing)
+// Method 4: Blue text in bottom-right (FEATURE SUPPORT TEST)
 fn draw_debug_text_method4(
     img: &mut RgbaImage,
     font: &FontArc,
     text: &str,
     img_width: u32,
     img_height: u32,
+    text_block: Option<&TextBlock>,
 ) -> anyhow::Result<()> {
-    let scale = PxScale::from(24.0);
+    let scale = PxScale::from(16.0);
     let color = Rgba([0, 0, 255, 255]); // Blue
-    let mut current_x = (img_width as i32) - 20;
+
+    // Show feature support test
+    let display_text = if let Some(block) = text_block {
+        let rust_support = "ab_glyph+imageproc";
+        let has_line_height = block.line_height.is_some();
+        let has_family = block.font_family.is_some();
+        let bbox = format!("{:.0}x{:.0}x{:.0}x{:.0}",
+            block.xmin, block.ymin, block.xmax, block.ymax);
+        format!("RUST:{} LH:{} FAM:{} BBOX:{}", rust_support, has_line_height, has_family, bbox)
+    } else {
+        "NO_BLOCK_DATA".to_string()
+    };
+
+    let text_width = measure_text_width(&display_text, font, scale);
+    let x = (img_width as i32) - (text_width as i32) - 20;
     let y = (img_height as i32) - 30;
-    
-    // Draw from right to left, character by character
-    for c in text.chars().rev() {
-        let char_str = c.to_string();
-        let char_width = measure_text_width(&char_str, font, scale);
-        current_x -= char_width as i32;
-        
-        draw_text_mut(img, color, current_x, y, scale, font, &char_str);
-    }
+
+    draw_text_mut(img, color, x, y, scale, font, &display_text);
     Ok(())
 }
 

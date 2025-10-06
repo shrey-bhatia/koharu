@@ -3,7 +3,9 @@
 import { useState, useEffect } from 'react'
 import { Button, Callout, Progress, Select, Badge, Text } from '@radix-ui/themes'
 import { Play, Download, AlertCircle, CheckCircle } from 'lucide-react'
-import { useEditorStore } from '@/lib/state'
+import { useEditorStore } from '../lib/state'
+
+      // Step 2: Get the correct base image} from '@/lib/state'
 import { extractBackgroundColor } from '@/utils/color-extraction'
 import { ensureReadableContrast } from '@/utils/wcag-contrast'
 import { calculateOptimalFontSize } from '@/utils/font-sizing'
@@ -237,6 +239,23 @@ export default function RenderPanel() {
       console.log('[EXPORT] Starting Rust-based export')
       console.log('[EXPORT] Render method:', renderMethod)
       console.log('[EXPORT] Text blocks:', textBlocks.length)
+      textBlocks.forEach((block, i) => {
+        console.log(`[EXPORT] Block ${i}:`)
+        console.log(`  - Original text: '${block.text || 'NULL'}'`)
+        console.log(`  - Translated text: '${block.translatedText || 'NULL'}'`)
+        console.log(`  - Font size: ${block.fontSize || 'NULL'}`)
+        console.log(`  - Text color: ${block.textColor ? `rgb(${block.textColor.r},${block.textColor.g},${block.textColor.b})` : 'NULL'}`)
+        console.log(`  - Background color: ${block.backgroundColor ? `rgb(${block.backgroundColor.r},${block.backgroundColor.g},${block.backgroundColor.b})` : 'NULL'}`)
+        console.log(`  - Manual text color: ${block.manualTextColor ? `rgb(${block.manualTextColor.r},${block.manualTextColor.g},${block.manualTextColor.b})` : 'NULL'}`)
+        console.log(`  - Manual bg color: ${block.manualBgColor ? `rgb(${block.manualBgColor.r},${block.manualBgColor.g},${block.manualBgColor.b})` : 'NULL'}`)
+        console.log(`  - Font family: '${block.fontFamily || 'NULL'}'`)
+        console.log(`  - Font weight: '${block.fontWeight || 'NULL'}'`)
+        console.log(`  - Font stretch: '${block.fontStretch || 'NULL'}'`)
+        console.log(`  - Letter spacing: ${block.letterSpacing || 'NULL'}`)
+        console.log(`  - Line height: ${block.lineHeight || 'NULL'}`)
+        console.log(`  - Appearance: ${block.appearance ? 'PRESENT' : 'NULL'}`)
+        console.log(`  - BBox: [${block.xmin}, ${block.ymin}, ${block.xmax}, ${block.ymax}]`)
+      })
 
       // Step 1: Get the correct base image
       const baseImageBitmap = getBaseImageForExport()
@@ -272,6 +291,22 @@ export default function RenderPanel() {
           outline_width_px: block.appearance.outlineWidthPx || null,
         } : null,
       }))
+
+      console.log('[EXPORT] Prepared textBlocks for Rust:')
+      textBlocksForRust.forEach((block, i) => {
+        console.log(`[EXPORT] Rust Block ${i}:`)
+        console.log(`  - translated_text: '${block.translated_text || 'NULL'}'`)
+        console.log(`  - font_size: ${block.font_size || 'NULL'}`)
+        console.log(`  - text_color: ${block.text_color ? `rgb(${block.text_color.r},${block.text_color.g},${block.text_color.b})` : 'NULL'}`)
+        console.log(`  - background_color: ${block.background_color ? `rgb(${block.background_color.r},${block.background_color.g},${block.background_color.b})` : 'NULL'}`)
+        console.log(`  - BBox: [${block.xmin}, ${block.ymin}, ${block.xmax}, ${block.ymax}]`)
+      })
+
+      // Show debug info in UI alert for testing
+      const debugInfo = textBlocksForRust.map((block, i) => 
+        `Block ${i}: translated_text='${block.translated_text || 'NULL'}', font_size=${block.font_size || 'NULL'}`
+      ).join('\n')
+      alert(`DEBUG: TextBlocks being sent to Rust:\n\n${debugInfo}`)
 
       console.log('[EXPORT] Calling Rust render_and_export_image...')
 
