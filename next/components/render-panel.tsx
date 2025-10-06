@@ -11,6 +11,7 @@ import { calculateImprovedFontSize } from '@/utils/improved-font-sizing'
 import { createImageFromBuffer } from '@/lib/image'
 import { invoke } from '@tauri-apps/api/core'
 import RenderCustomization from './render-customization'
+import { renderTextWithKonva, konvaTextToCanvas } from '@/utils/konva-text-render'
 
 // Utility function for creating canvas with OffscreenCanvas fallback
 function createCanvas(width: number, height: number): { canvas: HTMLCanvasElement | OffscreenCanvas, ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D } {
@@ -262,13 +263,6 @@ export default function RenderPanel() {
         console.log('[EXPORT] Drawing base image')
         ctx.drawImage(baseImage, 0, 0)
 
-        // Check if text drawing will work
-        console.log('[EXPORT] Testing text drawing context')
-        ctx.fillStyle = 'red'
-        ctx.font = '20px Arial'
-        ctx.fillText('TEST TEXT', 50, 50)
-        console.log('[EXPORT] Test text drawn')
-
         // PIPELINE SAFETY GUARDRAIL #2: Draw rectangles ONLY for Rectangle Fill mode
         // LaMa/NewLaMa modes render text directly over textless plate
         if (renderMethod === 'rectangle') {
@@ -298,89 +292,11 @@ export default function RenderPanel() {
         const rectanglesStage = await createImageFromBuffer(rectanglesBuffer)
         setPipelineStage('withRectangles', rectanglesStage)
 
-        // 3. Draw translated text with advanced typography support and proper wrapping
-        console.log(`[EXPORT] Drawing text for ${textBlocks.length} blocks`)
-        for (const block of textBlocks) {
-          if (!block.translatedText || !block.fontSize || !block.textColor) {
-            console.log(`[EXPORT] Skipping block - missing text or styling`)
-            continue
-          }
-
-          console.log(`[EXPORT] Drawing text for block: "${block.translatedText}"`)
-
-          const textColor = block.manualTextColor || block.textColor
-          const fontFamily = block.fontFamily || 'sans-serif'
-          const fontWeight = block.fontWeight || 'normal'
-          const fontStretch = block.fontStretch || 'normal'
-          ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
-          
-          // Feature detection for letterSpacing support with fallback
-          if ('letterSpacing' in ctx) {
-            ctx.letterSpacing = `${block.letterSpacing || 0}px`
-          } else if (block.letterSpacing && block.letterSpacing !== 0) {
-            // Fallback for browsers that don't support letterSpacing
-            console.warn('Canvas letterSpacing not supported, using manual fallback')
-            // Manual letter spacing would require more complex text rendering
-          }
-          
-          ctx.textAlign = 'center'
-          ctx.textBaseline = 'middle'
-
-          // Configure outline if available from appearance analysis
-          const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
-          if (hasOutline) {
-            ctx.strokeStyle = `rgb(${block.appearance.sourceOutlineColor.r}, ${block.appearance.sourceOutlineColor.g}, ${block.appearance.sourceOutlineColor.b})`
-            ctx.lineWidth = block.appearance.outlineWidthPx
-            ctx.lineJoin = 'round'
-            ctx.miterLimit = 2
-          }
-
-          ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
-
-          const boxWidth = block.xmax - block.xmin
-          const boxHeight = block.ymax - block.ymin
-          const maxWidth = boxWidth * 0.9 // 10% padding
-          const centerX = (block.xmin + block.xmax) / 2
-          const centerY = (block.ymin + block.ymax) / 2
-
-          // Wrap text to fit within box width
-          const words = block.translatedText.split(' ')
-          const lines: string[] = []
-          let currentLine = ''
-
-          for (const word of words) {
-            const testLine = currentLine + (currentLine ? ' ' : '') + word
-            const metrics = ctx.measureText(testLine)
-
-            if (metrics.width > maxWidth && currentLine !== '') {
-              lines.push(currentLine)
-              currentLine = word
-            } else {
-              currentLine = testLine
-            }
-          }
-          if (currentLine) lines.push(currentLine)
-
-          const lineHeight = block.fontSize * block.lineHeight
-          const totalHeight = lines.length * lineHeight
-
-          // Start from top if text is too tall, otherwise center vertically
-          const startY = totalHeight > boxHeight * 0.9
-            ? block.ymin + lineHeight / 2
-            : centerY - ((lines.length - 1) * lineHeight) / 2
-
-          lines.forEach((line, i) => {
-            const y = startY + i * lineHeight
-
-            // Draw outline first (if present)
-            if (hasOutline) {
-              ctx.strokeText(line, centerX, y, maxWidth)
-            }
-
-            // Then draw fill on top
-            ctx.fillText(line, centerX, y, maxWidth)
-          })
-        }
+        // 3. Draw translated text using Konva for consistent, high-quality rendering
+        console.log(`[EXPORT] Drawing text for ${textBlocks.length} blocks using Konva`)
+        
+        // Use Konva for text rendering (replaces problematic Canvas 2D text rendering)
+        await renderTextWithKonva(canvas as HTMLCanvasElement, textBlocks, { debug: true })
 
         // 4. Save final stage and export as PNG
         const finalBlob = await canvasToBlob(canvas, { type: 'image/png', quality: 1.0 })
@@ -440,13 +356,6 @@ export default function RenderPanel() {
       // 1. Draw base image (original or textless)
       ctx.drawImage(baseImage, 0, 0)
 
-      // Check if text drawing will work
-      console.log('[FINAL_COMP] Testing text drawing context')
-      ctx.fillStyle = 'red'
-      ctx.font = '20px Arial'
-      ctx.fillText('TEST TEXT', 50, 50)
-      console.log('[FINAL_COMP] Test text drawn')
-
       // 2. Draw rectangles ONLY for Rectangle Fill mode
       if (renderMethod === 'rectangle') {
         for (const block of textBlocks) {
@@ -466,81 +375,11 @@ export default function RenderPanel() {
         }
       }
 
-      // 3. Draw translated text with advanced typography support and proper wrapping
-      console.log(`[FINAL_COMP] Drawing text for ${textBlocks.length} blocks`)
-      for (const block of textBlocks) {
-        if (!block.translatedText || !block.fontSize || !block.textColor) {
-          console.log(`[FINAL_COMP] Skipping block - missing text or styling`)
-          continue
-        }
-
-        console.log(`[FINAL_COMP] Drawing text for block: "${block.translatedText}"`)
-
-        const textColor = block.manualTextColor || block.textColor
-        const fontFamily = block.fontFamily || 'sans-serif'
-        const fontWeight = block.fontWeight || 'normal'
-        const fontStretch = block.fontStretch || 'normal'
-        ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
-        // ctx.letterSpacing is not widely supported in Canvas 2D context
-        // Use manual spacing adjustment instead if needed
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-
-        // Configure outline if available from appearance analysis
-        const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
-        if (hasOutline) {
-          ctx.strokeStyle = `rgb(${block.appearance.sourceOutlineColor.r}, ${block.appearance.sourceOutlineColor.g}, ${block.appearance.sourceOutlineColor.b})`
-          ctx.lineWidth = block.appearance.outlineWidthPx
-          ctx.lineJoin = 'round'
-          ctx.miterLimit = 2
-        }
-
-        ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
-
-        const boxWidth = block.xmax - block.xmin
-        const boxHeight = block.ymax - block.ymin
-        const maxWidth = boxWidth * 0.9 // 10% padding
-        const centerX = (block.xmin + block.xmax) / 2
-        const centerY = (block.ymin + block.ymax) / 2
-
-        // Wrap text to fit within box width
-        const words = block.translatedText.split(' ')
-        const lines: string[] = []
-        let currentLine = ''
-
-        for (const word of words) {
-          const testLine = currentLine + (currentLine ? ' ' : '') + word
-          const metrics = ctx.measureText(testLine)
-
-          if (metrics.width > maxWidth && currentLine !== '') {
-            lines.push(currentLine)
-            currentLine = word
-          } else {
-            currentLine = testLine
-          }
-        }
-        if (currentLine) lines.push(currentLine)
-
-        const lineHeight = block.fontSize * block.lineHeight
-        const totalHeight = lines.length * lineHeight
-
-        // Start from top if text is too tall, otherwise center vertically
-        const startY = totalHeight > boxHeight * 0.9
-          ? block.ymin + lineHeight / 2
-          : centerY - ((lines.length - 1) * lineHeight) / 2
-
-        lines.forEach((line, i) => {
-          const y = startY + i * lineHeight
-
-          // Draw outline first (if present)
-          if (hasOutline) {
-            ctx.strokeText(line, centerX, y, maxWidth)
-          }
-
-          // Then draw fill on top
-          ctx.fillText(line, centerX, y, maxWidth)
-        })
-      }
+      // 3. Draw translated text using Konva for consistent, high-quality rendering
+      console.log(`[FINAL_COMP] Drawing text for ${textBlocks.length} blocks using Konva`)
+      
+      // Use Konva for text rendering (replaces problematic Canvas 2D text rendering)
+      await renderTextWithKonva(canvas as HTMLCanvasElement, textBlocks, { debug: true })
 
       // Save final stage
       const finalBlob = await canvasToBlob(canvas, { type: 'image/png', quality: 1.0 })
