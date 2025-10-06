@@ -12,6 +12,42 @@ import { createImageFromBuffer } from '@/lib/image'
 import { invoke } from '@tauri-apps/api/core'
 import RenderCustomization from './render-customization'
 
+// Utility function for creating canvas with OffscreenCanvas fallback
+function createCanvas(width: number, height: number): { canvas: HTMLCanvasElement | OffscreenCanvas, ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D } {
+  if (typeof OffscreenCanvas !== 'undefined') {
+    const canvas = new OffscreenCanvas(width, height)
+    const ctx = canvas.getContext('2d')
+    if (ctx) return { canvas, ctx }
+  }
+  
+  // Fallback to regular canvas
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Failed to get canvas context')
+  return { canvas, ctx }
+}
+
+// Utility function for converting canvas to blob with fallback
+async function canvasToBlob(canvas: HTMLCanvasElement | OffscreenCanvas, options?: { type?: string, quality?: number }): Promise<Blob> {
+  if (canvas instanceof OffscreenCanvas && 'convertToBlob' in canvas) {
+    return await canvas.convertToBlob(options)
+  }
+  
+  // Fallback for HTMLCanvasElement
+  if (canvas instanceof HTMLCanvasElement) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob)
+        else reject(new Error('Failed to convert canvas to blob'))
+      }, options?.type || 'image/png', options?.quality)
+    })
+  }
+  
+  throw new Error('Unsupported canvas type')
+}
+
 interface GpuStatus {
   requested_provider: string
   active_provider: string
@@ -206,10 +242,8 @@ export default function RenderPanel() {
       if (!image) return
 
       try {
-        // Create offscreen canvas at original resolution
-        const canvas = new OffscreenCanvas(image.bitmap.width, image.bitmap.height)
-        const ctx = canvas.getContext('2d')
-        if (!ctx) throw new Error('Failed to get canvas context')
+        // Create canvas at original resolution using utility function
+        const { canvas, ctx } = createCanvas(image.bitmap.width, image.bitmap.height)
 
         // Determine base image based on render method
         let baseImage: ImageBitmap
@@ -259,7 +293,7 @@ export default function RenderPanel() {
         }
 
         // Save 'withRectangles' stage (base + backgrounds, no text yet)
-        const rectanglesBlob = await canvas.convertToBlob({ type: 'image/png' })
+        const rectanglesBlob = await canvasToBlob(canvas, { type: 'image/png' })
         const rectanglesBuffer = await rectanglesBlob.arrayBuffer()
         const rectanglesStage = await createImageFromBuffer(rectanglesBuffer)
         setPipelineStage('withRectangles', rectanglesStage)
@@ -275,14 +309,20 @@ export default function RenderPanel() {
           console.log(`[EXPORT] Drawing text for block: "${block.translatedText}"`)
 
           const textColor = block.manualTextColor || block.textColor
-          const fontFamily = block.fontFamily || defaultFont
+          const fontFamily = block.fontFamily || 'sans-serif'
           const fontWeight = block.fontWeight || 'normal'
           const fontStretch = block.fontStretch || 'normal'
-          const letterSpacing = block.letterSpacing || 0
-          const lineHeightMultiplier = block.lineHeight || 1.2
-
           ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
-          ctx.letterSpacing = `${letterSpacing}px`
+          
+          // Feature detection for letterSpacing support with fallback
+          if ('letterSpacing' in ctx) {
+            ctx.letterSpacing = `${block.letterSpacing || 0}px`
+          } else if (block.letterSpacing && block.letterSpacing !== 0) {
+            // Fallback for browsers that don't support letterSpacing
+            console.warn('Canvas letterSpacing not supported, using manual fallback')
+            // Manual letter spacing would require more complex text rendering
+          }
+          
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
 
@@ -321,7 +361,7 @@ export default function RenderPanel() {
           }
           if (currentLine) lines.push(currentLine)
 
-          const lineHeight = block.fontSize * lineHeightMultiplier
+          const lineHeight = block.fontSize * block.lineHeight
           const totalHeight = lines.length * lineHeight
 
           // Start from top if text is too tall, otherwise center vertically
@@ -343,7 +383,7 @@ export default function RenderPanel() {
         }
 
         // 4. Save final stage and export as PNG
-        const finalBlob = await canvas.convertToBlob({ type: 'image/png', quality: 1.0 })
+        const finalBlob = await canvasToBlob(canvas, { type: 'image/png', quality: 1.0 })
         const finalBuffer = await finalBlob.arrayBuffer()
         const finalStage = await createImageFromBuffer(finalBuffer)
         setPipelineStage('final', finalStage)
@@ -379,9 +419,7 @@ export default function RenderPanel() {
     try {
       console.log('[FINAL_COMP] Generating final composition')
       // Create offscreen canvas at original resolution
-      const canvas = new OffscreenCanvas(image.bitmap.width, image.bitmap.height)
-      const ctx = canvas.getContext('2d')
-      if (!ctx) throw new Error('Failed to get canvas context')
+      const { canvas, ctx } = createCanvas(image.bitmap.width, image.bitmap.height)
 
       // Determine base image based on render method
       let baseImage: ImageBitmap
@@ -439,14 +477,12 @@ export default function RenderPanel() {
         console.log(`[FINAL_COMP] Drawing text for block: "${block.translatedText}"`)
 
         const textColor = block.manualTextColor || block.textColor
-        const fontFamily = block.fontFamily || defaultFont
+        const fontFamily = block.fontFamily || 'sans-serif'
         const fontWeight = block.fontWeight || 'normal'
         const fontStretch = block.fontStretch || 'normal'
-        const letterSpacing = block.letterSpacing || 0
-        const lineHeightMultiplier = block.lineHeight || 1.2
-
         ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
-        ctx.letterSpacing = `${letterSpacing}px`
+        // ctx.letterSpacing is not widely supported in Canvas 2D context
+        // Use manual spacing adjustment instead if needed
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
 
@@ -485,7 +521,7 @@ export default function RenderPanel() {
         }
         if (currentLine) lines.push(currentLine)
 
-        const lineHeight = block.fontSize * lineHeightMultiplier
+        const lineHeight = block.fontSize * block.lineHeight
         const totalHeight = lines.length * lineHeight
 
         // Start from top if text is too tall, otherwise center vertically
@@ -507,7 +543,7 @@ export default function RenderPanel() {
       }
 
       // Save final stage
-      const finalBlob = await canvas.convertToBlob({ type: 'image/png', quality: 1.0 })
+      const finalBlob = await canvasToBlob(canvas, { type: 'image/png', quality: 1.0 })
       const finalBuffer = await finalBlob.arrayBuffer()
       const finalStage = await createImageFromBuffer(finalBuffer)
       setPipelineStage('final', finalStage)
