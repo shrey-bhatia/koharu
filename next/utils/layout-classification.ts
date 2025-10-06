@@ -47,7 +47,7 @@ export function classifyLayout(block: TextBlock): LayoutStrategy {
       mode: 'caption',
       preferredAlignment: 'top',
       columnWidthRatio: 0.95,
-      targetCoverageRatio: 0.6,
+      targetCoverageRatio: 0.75,  // Increased from 0.6 for better visual size
       lineHeightMultiplier: 1.3,
       letterSpacingAdjustment: 0,
     }
@@ -59,7 +59,7 @@ export function classifyLayout(block: TextBlock): LayoutStrategy {
       mode: 'vertical-narrow',
       preferredAlignment: 'center',
       columnWidthRatio: 0.7,  // Narrow column to mimic vertical stacking
-      targetCoverageRatio: 0.75,
+      targetCoverageRatio: 0.85,  // Increased from 0.75 for better visual size
       lineHeightMultiplier: 1.4,
       letterSpacingAdjustment: 1,
     }
@@ -72,7 +72,7 @@ export function classifyLayout(block: TextBlock): LayoutStrategy {
       preferredAlignment: determineCentroidAlignment(centroid, boxWidth, boxHeight),
       rotationDeg: orientationDeg,
       columnWidthRatio: 0.85,
-      targetCoverageRatio: 0.7,
+      targetCoverageRatio: 0.8,  // Increased from 0.7 for better visual size
       lineHeightMultiplier: 1.2,
       letterSpacingAdjustment: 0,
     }
@@ -83,7 +83,7 @@ export function classifyLayout(block: TextBlock): LayoutStrategy {
     mode: 'horizontal-standard',
     preferredAlignment: 'center',
     columnWidthRatio: 0.9,
-    targetCoverageRatio: 0.75,
+    targetCoverageRatio: 0.85,  // Increased from 0.75 for better visual size
     lineHeightMultiplier: 1.2,
     letterSpacingAdjustment: 0,
   }

@@ -185,7 +185,7 @@ export default function RenderPanel() {
             boxWidth,
             boxHeight,
             fontToUse,
-            0.1
+            0.05  // Reduced padding from 0.1 (10%) to 0.05 (5%) for larger text
           )
           fontMetrics = {
             ...classic,
