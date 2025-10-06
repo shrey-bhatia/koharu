@@ -313,9 +313,11 @@ fn draw_text_block(
                     
                     if letter_spacing == 0.0 {
                         // Simple stroke - draw with offset
+                        let text_width = measure_text_width(line, font, scale);
+                        let left_x = center_x - text_width / 2.0;
                         draw_text_with_outline(
                             img,
-                            center_x as i32,
+                            left_x as i32,
                             y as i32,
                             scale,
                             font,
@@ -344,10 +346,12 @@ fn draw_text_block(
         // Draw fill on top (matches JS: fill after stroke)
         if letter_spacing == 0.0 {
             // Simple rendering (matches JS: ctx.fillText(text, x, y, maxWidth))
+            let text_width = measure_text_width(line, font, scale);
+            let left_x = center_x - text_width / 2.0;
             draw_text_mut(
                 img,
                 text_rgba,
-                center_x as i32,
+                left_x as i32,
                 y as i32,
                 scale,
                 font,
@@ -436,12 +440,11 @@ fn draw_text_with_spacing(
     for c in text.chars() {
         let char_str = c.to_string();
         let char_width = measure_text_width(&char_str, font, scale);
-        let char_center_x = current_x + char_width / 2.0;
         
         draw_text_mut(
             img,
             color,
-            char_center_x as i32,
+            current_x as i32,
             y as i32,
             scale,
             font,
@@ -501,11 +504,10 @@ fn draw_text_with_spacing_and_outline(
     for c in text.chars() {
         let char_str = c.to_string();
         let char_width = measure_text_width(&char_str, font, scale);
-        let char_center_x = current_x + char_width / 2.0;
         
         draw_text_with_outline(
             img,
-            char_center_x as i32,
+            current_x as i32,
             y as i32,
             scale,
             font,
