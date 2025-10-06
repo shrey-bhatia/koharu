@@ -145,6 +145,10 @@ pub fn render_text_on_image(
         "NO_TEXT_BLOCKS"
     };
 
+    // DEBUG: Corner diagnostic markers for text export verification
+    // These draw colored text in image corners showing export data flow
+    // Uncomment to enable debug diagnostics in exported images
+    /*
     // Method 1: Red text in top-left (DATA FLOW DIAGNOSIS)
     draw_debug_text_method1(&mut img, &debug_font, debug_text, width, height, text_blocks.first(), text_blocks.len())?;
 
@@ -156,6 +160,7 @@ pub fn render_text_on_image(
 
     // Method 4: Blue text in bottom-right (FEATURE SUPPORT TEST)
     draw_debug_text_method4(&mut img, &debug_font, debug_text, width, height, text_blocks.first())?;
+    */
 
     // Step 3: Draw translated text (original logic)
     tracing::info!("[RUST_EXPORT] Drawing text for {} blocks", text_blocks.len());

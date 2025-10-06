@@ -236,6 +236,9 @@ export default function RenderPanel() {
 
       if (!image) return
 
+      // DEBUG: Extensive logging for export process debugging
+      // Uncomment to enable detailed export logging
+      /*
       console.log('[EXPORT] Starting Rust-based export')
       console.log('[EXPORT] Render method:', renderMethod)
       console.log('[EXPORT] Text blocks:', textBlocks.length)
@@ -256,10 +259,12 @@ export default function RenderPanel() {
         console.log(`  - Appearance: ${block.appearance ? 'PRESENT' : 'NULL'}`)
         console.log(`  - BBox: [${block.xmin}, ${block.ymin}, ${block.xmax}, ${block.ymax}]`)
       })
+      */
 
       // Step 1: Get the correct base image
       const baseImageBitmap = getBaseImageForExport()
-      console.log('[EXPORT] Base image:', baseImageBitmap.width, 'x', baseImageBitmap.height)
+      // DEBUG: Log base image dimensions
+      // console.log('[EXPORT] Base image:', baseImageBitmap.width, 'x', baseImageBitmap.height)
 
       // Step 2: Convert ImageBitmap to buffer for Rust
       const canvas = new OffscreenCanvas(baseImageBitmap.width, baseImageBitmap.height)
@@ -292,6 +297,9 @@ export default function RenderPanel() {
         } : null,
       }))
 
+      // DEBUG: Log prepared textBlocks for Rust debugging
+      // Uncomment to enable detailed Rust data structure logging
+      /*
       console.log('[EXPORT] Prepared textBlocks for Rust:')
       textBlocksForRust.forEach((block, i) => {
         console.log(`[EXPORT] Rust Block ${i}:`)
@@ -301,14 +309,20 @@ export default function RenderPanel() {
         console.log(`  - backgroundColor: ${block.backgroundColor ? `rgb(${block.backgroundColor.r},${block.backgroundColor.g},${block.backgroundColor.b})` : 'NULL'}`)
         console.log(`  - BBox: [${block.xmin}, ${block.ymin}, ${block.xmax}, ${block.ymax}]`)
       })
+      */
 
       // Show debug info in UI alert for testing
+      // DEBUG: UI alert showing TextBlocks data sent to Rust
+      // Uncomment to enable popup showing export data for debugging
+      /*
       const debugInfo = textBlocksForRust.map((block, i) => 
         `Block ${i}: translatedText='${block.translatedText || 'NULL'}', fontSize=${block.fontSize || 'NULL'}`
       ).join('\n')
       alert(`DEBUG: TextBlocks being sent to Rust:\n\n${debugInfo}`)
+      */
 
-      console.log('[EXPORT] Calling Rust render_and_export_image...')
+      // DEBUG: Log Rust function call
+      // console.log('[EXPORT] Calling Rust render_and_export_image...')
 
       // Step 4: Call Rust backend
       const pngBuffer: number[] = await invoke('render_and_export_image', {
@@ -320,7 +334,8 @@ export default function RenderPanel() {
         },
       })
 
-      console.log('[EXPORT] Rust rendering complete, buffer size:', pngBuffer.length)
+      // DEBUG: Log completion and buffer size
+      // console.log('[EXPORT] Rust rendering complete, buffer size:', pngBuffer.length)
 
       // Step 5: Convert buffer to Blob and save
       const exportBlob = new Blob([new Uint8Array(pngBuffer)], { type: 'image/png' })
