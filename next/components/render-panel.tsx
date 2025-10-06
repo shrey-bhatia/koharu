@@ -275,36 +275,36 @@ export default function RenderPanel() {
         ymin: block.ymin,
         xmax: block.xmax,
         ymax: block.ymax,
-        translated_text: block.translatedText || null,
-        font_size: block.fontSize || null,
-        text_color: block.textColor || null,
-        background_color: block.backgroundColor || null,
-        manual_bg_color: block.manualBgColor || null,
-        manual_text_color: block.manualTextColor || null,
-        font_family: block.fontFamily || null,
-        font_weight: block.fontWeight || null,
-        font_stretch: block.fontStretch || null,
-        letter_spacing: block.letterSpacing || null,
-        line_height: block.lineHeight || null,
+        translatedText: block.translatedText || null,
+        fontSize: block.fontSize || null,
+        textColor: block.textColor || null,
+        backgroundColor: block.backgroundColor || null,
+        manualBgColor: block.manualBgColor || null,
+        manualTextColor: block.manualTextColor || null,
+        fontFamily: block.fontFamily || null,
+        fontWeight: block.fontWeight || null,
+        fontStretch: block.fontStretch || null,
+        letterSpacing: block.letterSpacing || null,
+        lineHeight: block.lineHeight || null,
         appearance: block.appearance ? {
-          source_outline_color: block.appearance.sourceOutlineColor || null,
-          outline_width_px: block.appearance.outlineWidthPx || null,
+          sourceOutlineColor: block.appearance.sourceOutlineColor || null,
+          outlineWidthPx: block.appearance.outlineWidthPx || null,
         } : null,
       }))
 
       console.log('[EXPORT] Prepared textBlocks for Rust:')
       textBlocksForRust.forEach((block, i) => {
         console.log(`[EXPORT] Rust Block ${i}:`)
-        console.log(`  - translated_text: '${block.translated_text || 'NULL'}'`)
-        console.log(`  - font_size: ${block.font_size || 'NULL'}`)
-        console.log(`  - text_color: ${block.text_color ? `rgb(${block.text_color.r},${block.text_color.g},${block.text_color.b})` : 'NULL'}`)
-        console.log(`  - background_color: ${block.background_color ? `rgb(${block.background_color.r},${block.background_color.g},${block.background_color.b})` : 'NULL'}`)
+        console.log(`  - translatedText: '${block.translatedText || 'NULL'}'`)
+        console.log(`  - fontSize: ${block.fontSize || 'NULL'}`)
+        console.log(`  - textColor: ${block.textColor ? `rgb(${block.textColor.r},${block.textColor.g},${block.textColor.b})` : 'NULL'}`)
+        console.log(`  - backgroundColor: ${block.backgroundColor ? `rgb(${block.backgroundColor.r},${block.backgroundColor.g},${block.backgroundColor.b})` : 'NULL'}`)
         console.log(`  - BBox: [${block.xmin}, ${block.ymin}, ${block.xmax}, ${block.ymax}]`)
       })
 
       // Show debug info in UI alert for testing
       const debugInfo = textBlocksForRust.map((block, i) => 
-        `Block ${i}: translated_text='${block.translated_text || 'NULL'}', font_size=${block.font_size || 'NULL'}`
+        `Block ${i}: translatedText='${block.translatedText || 'NULL'}', fontSize=${block.fontSize || 'NULL'}`
       ).join('\n')
       alert(`DEBUG: TextBlocks being sent to Rust:\n\n${debugInfo}`)
 

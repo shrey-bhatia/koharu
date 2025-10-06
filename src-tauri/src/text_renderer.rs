@@ -488,15 +488,16 @@ fn draw_debug_text_method1(
             let has_translated = block.translated_text.is_some();
             let text_len = block.translated_text.as_ref().map(|s| s.len()).unwrap_or(0);
             let text_preview = block.translated_text.as_ref()
-                .map(|s| s.chars().take(15).collect::<String>())
-                .unwrap_or("NULL".to_string());
-            format!("BLOCKS:{} HAS_TEXT:{} LEN:{} PREV:'{}'",
-                text_blocks_len, has_translated, text_len, text_preview)
+                .map(|s| s.chars().take(10).collect::<String>())
+                .unwrap_or("NONE".to_string());
+            let raw_text = format!("{:?}", block.translated_text);
+            format!("BLOCKS:{} HAS:{} LEN:{} PREV:'{}' RAW:{}",
+                text_blocks_len, has_translated, text_len, text_preview, raw_text)
         } else {
             format!("BLOCKS:{} BUT_NO_FIRST_BLOCK", text_blocks_len)
         }
     } else {
-        "BLOCKS:0_NO_DATA_RECEIVED".to_string()
+        "BLOCKS:0_NO_DATA".to_string()
     };
 
     draw_text_mut(img, color, x, y, scale, font, &display_text);
@@ -521,8 +522,9 @@ fn draw_debug_text_method2(
         let has_color = block.text_color.is_some();
         let has_bg = block.background_color.is_some();
         let font_size = block.font_size.unwrap_or(0.0);
-        format!("LEN:{} COLOR:{} BG:{} SIZE:{:.0}",
-            text_len, has_color, has_bg, font_size)
+        let raw_size = format!("{:?}", block.font_size);
+        format!("LEN:{} COLOR:{} BG:{} SIZE:{:.1} RAW_SIZE:{}",
+            text_len, has_color, has_bg, font_size, raw_size)
     } else {
         "NO_BLOCK_DATA".to_string()
     };
