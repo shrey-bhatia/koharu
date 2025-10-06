@@ -6,6 +6,9 @@ use imageproc::drawing::{draw_filled_rect_mut, draw_text_mut};
 use imageproc::rect::Rect as IpRect;
 use ab_glyph::{FontArc, PxScale};
 use serde::Deserialize;
+use font_kit::source::SystemSource;
+use font_kit::family_name::FamilyName;
+use font_kit::properties::Properties;
 
 // RGB color type matching frontend
 #[derive(Debug, Deserialize, Clone)]
@@ -45,6 +48,36 @@ pub struct AppearanceData {
     pub outline_width_px: Option<f32>,
 }
 
+/// Load a font by family name from system fonts, with fallback to embedded font
+fn load_font_by_family(family_name: &str) -> anyhow::Result<FontArc> {
+    let source = SystemSource::new();
+    
+    // Try to find the font family using select_best_match
+    let family = FamilyName::Title(family_name.to_string());
+    let properties = Properties::new();
+    
+    match source.select_best_match(&[family], &properties) {
+        Ok(handle) => {
+            // Load the font data
+            let font_data = handle.load()?;
+            let font_bytes = font_data.copy_font_data()
+                .ok_or_else(|| anyhow::anyhow!("Failed to copy font data"))?;
+            let font = FontArc::try_from_vec((*font_bytes).clone())
+                .map_err(|e| anyhow::anyhow!("Failed to load system font '{}': {}", family_name, e))?;
+            tracing::debug!("[FONT] Loaded system font: {}", family_name);
+            Ok(font)
+        }
+        Err(_) => {
+            // Fallback to embedded Noto Sans
+            let font_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+            let font = FontArc::try_from_vec(font_data.to_vec())
+                .map_err(|e| anyhow::anyhow!("Failed to load fallback font: {}", e))?;
+            tracing::warn!("[FONT] Font '{}' not found, using fallback Noto Sans", family_name);
+            Ok(font)
+        }
+    }
+}
+
 /// Render text on image following the exact same logic as JavaScript export
 /// 
 /// Image routing:
@@ -54,14 +87,12 @@ pub fn render_text_on_image(
     base_image: DynamicImage,
     text_blocks: Vec<TextBlock>,
     render_method: &str,
-    font_data: &[u8],
     default_font: &str,
 ) -> anyhow::Result<DynamicImage> {
     let mut img = base_image.to_rgba8();
 
-    // Load font using ab_glyph
-    let font = FontArc::try_from_vec(font_data.to_vec())
-        .map_err(|_| anyhow::anyhow!("Failed to load font"))?;
+    // Load default font for debug text
+    let debug_font = load_font_by_family(default_font)?;
 
     // Step 1: Draw rectangles ONLY for Rectangle Fill mode
     // (lama/newlama render text directly over inpainted image)
@@ -114,16 +145,16 @@ pub fn render_text_on_image(
     };
 
     // Method 1: Red text in top-left (DATA FLOW DIAGNOSIS)
-    draw_debug_text_method1(&mut img, &font, debug_text, width, height, text_blocks.first(), text_blocks.len())?;
+    draw_debug_text_method1(&mut img, &debug_font, debug_text, width, height, text_blocks.first(), text_blocks.len())?;
 
     // Method 2: Black text in top-right (CONTENT ANALYSIS)
-    draw_debug_text_method2(&mut img, &font, debug_text, width, height, text_blocks.first())?;
+    draw_debug_text_method2(&mut img, &debug_font, debug_text, width, height, text_blocks.first())?;
 
     // Method 3: Yellow text in bottom-left (SERIALIZATION CHECK)
-    draw_debug_text_method3(&mut img, &font, debug_text, width, height, text_blocks.first())?;
+    draw_debug_text_method3(&mut img, &debug_font, debug_text, width, height, text_blocks.first())?;
 
     // Method 4: Blue text in bottom-right (FEATURE SUPPORT TEST)
-    draw_debug_text_method4(&mut img, &font, debug_text, width, height, text_blocks.first())?;
+    draw_debug_text_method4(&mut img, &debug_font, debug_text, width, height, text_blocks.first())?;
 
     // Step 3: Draw translated text (original logic)
     tracing::info!("[RUST_EXPORT] Drawing text for {} blocks", text_blocks.len());
@@ -151,6 +182,9 @@ pub fn render_text_on_image(
             .unwrap_or(default_font);
         let letter_spacing = block.letter_spacing.unwrap_or(0.0);
         let line_height_multiplier = block.line_height.unwrap_or(1.2);
+
+        // Load the appropriate font for this text block
+        let font = load_font_by_family(font_family)?;
 
         tracing::debug!("[RUST_EXPORT] Drawing block {}: '{}' font={} size={}",
             i, &translated_text[..translated_text.len().min(30)], font_family, font_size);

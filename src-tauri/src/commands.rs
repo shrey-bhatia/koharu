@@ -810,15 +810,11 @@ pub async fn render_and_export_image(
         base_image.height()
     );
     
-    // Load embedded font (Noto Sans as default)
-    let font_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
-    
-    // Render text on image
+    // Render text on image (fonts loaded dynamically per text block)
     let rendered_image = render_text_on_image(
         base_image,
         request.text_blocks,
         &request.render_method,
-        font_data,
         &request.default_font,
     )
     .context("Rendering failed")?;
