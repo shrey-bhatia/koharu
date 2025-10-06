@@ -208,6 +208,7 @@ export const useEditorStore = create(
       inpaintingConfig: INPAINTING_PRESETS.balanced,
       inpaintingPreset: 'balanced' as 'fast' | 'balanced' | 'quality' | 'custom',
       defaultFont: loadDefaultFont(),
+      fontSizeStep: 2,
     } as {
       image: Image | null
       tool: string
@@ -234,6 +235,7 @@ export const useEditorStore = create(
       inpaintingConfig: InpaintingConfig
       inpaintingPreset: 'fast' | 'balanced' | 'quality' | 'custom'
       defaultFont: string
+      fontSizeStep: number
     },
     (set) => ({
       setImage: (image: Image | null) => set({
@@ -334,6 +336,7 @@ export const useEditorStore = create(
         }
         set({ defaultFont: font })
       },
+      setFontSizeStep: (step: number) => set({ fontSizeStep: step }),
     })
   )
 )

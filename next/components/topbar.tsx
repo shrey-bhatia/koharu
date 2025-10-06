@@ -1,7 +1,7 @@
 'use client'
 
-import { Image, Moon, Sun, Clipboard } from 'lucide-react'
-import { Button, IconButton, Badge } from '@radix-ui/themes'
+import { Image, Moon, Sun, Clipboard, ChevronUp, ChevronDown } from 'lucide-react'
+import { Button, IconButton, Badge, Slider } from '@radix-ui/themes'
 import { fileOpen } from 'browser-fs-access'
 import { useEditorStore } from '@/lib/state'
 import { createImageFromBlob } from '@/lib/image'
@@ -9,7 +9,7 @@ import SettingsDialog from './settings-dialog'
 import DetectionControls from './detection-controls'
 
 function Topbar() {
-  const { setImage, theme, setTheme, tool, currentStage, setCurrentStage, pipelineStages, renderMethod } = useEditorStore()
+  const { setImage, theme, setTheme, tool, currentStage, setCurrentStage, pipelineStages, renderMethod, textBlocks, fontSizeStep, setFontSizeStep, setTextBlocks } = useEditorStore()
 
   const handleOpenImage = async () => {
     try {
@@ -52,6 +52,22 @@ function Topbar() {
     } catch (err) {
       alert(`Error pasting image: ${err}`)
     }
+  }
+
+  const increaseFontSize = () => {
+    const updated = textBlocks.map(block => ({
+      ...block,
+      fontSize: Math.max(1, (block.fontSize || 16) + fontSizeStep)
+    }))
+    setTextBlocks(updated)
+  }
+
+  const decreaseFontSize = () => {
+    const updated = textBlocks.map(block => ({
+      ...block,
+      fontSize: Math.max(1, (block.fontSize || 16) - fontSizeStep)
+    }))
+    setTextBlocks(updated)
   }
 
   const stageLabels = {
@@ -110,6 +126,35 @@ function Topbar() {
       </div>
 
       <div className='mx-1 flex items-center gap-1'>
+        {textBlocks.some(b => b.translatedText) && (
+          <>
+            <div className='flex items-center gap-2'>
+              <span className='text-sm'>Font Size Step:</span>
+              <Slider
+                value={[fontSizeStep]}
+                onValueChange={(value) => setFontSizeStep(value[0])}
+                min={1}
+                max={10}
+                step={1}
+                className='w-16'
+              />
+              <input
+                type='number'
+                value={fontSizeStep}
+                onChange={(e) => setFontSizeStep(parseInt(e.target.value) || 1)}
+                min={1}
+                max={10}
+                className='w-12 px-1 py-0.5 text-sm border rounded'
+              />
+            </div>
+            <Button onClick={decreaseFontSize} size='1' variant='soft'>
+              <ChevronDown size={16} /> A
+            </Button>
+            <Button onClick={increaseFontSize} size='1' variant='soft'>
+              <ChevronUp size={16} /> A
+            </Button>
+          </>
+        )}
         <IconButton
           variant='ghost'
           onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
