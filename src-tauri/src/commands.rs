@@ -7,6 +7,7 @@ use reqwest;
 use serde::{Deserialize, Serialize};
 
 use crate::{AppState, error::CommandResult};
+use crate::text_renderer::{render_text_on_image, TextBlock};
 
 #[tauri::command]
 pub async fn detection(
@@ -766,4 +767,72 @@ pub async fn translate_with_ollama(
         .context("Failed to parse Ollama API response")?;
 
     Ok(ollama_response.message.content)
+}
+
+// ============================================================================
+// Image Rendering and Export Commands
+// ============================================================================
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderRequest {
+    pub base_image_buffer: Vec<u8>,
+    pub text_blocks: Vec<TextBlock>,
+    pub render_method: String,
+    pub default_font: String,
+}
+
+#[tauri::command]
+pub async fn render_and_export_image(
+    request: RenderRequest,
+) -> CommandResult<Vec<u8>> {
+    tracing::info!(
+        "[RUST_EXPORT] Starting render with method='{}', {} text blocks",
+        request.render_method,
+        request.text_blocks.len()
+    );
+    
+    // Validate render method
+    if request.render_method != "rectangle" 
+        && request.render_method != "lama" 
+        && request.render_method != "newlama" 
+    {
+        return Err(anyhow::anyhow!("Invalid render method: {}", request.render_method).into());
+    }
+    
+    // Load base image from buffer
+    let base_image = image::load_from_memory(&request.base_image_buffer)
+        .context("Failed to load base image")?;
+    
+    tracing::info!(
+        "[RUST_EXPORT] Base image loaded: {}x{}",
+        base_image.width(),
+        base_image.height()
+    );
+    
+    // Load embedded font (Noto Sans as default)
+    let font_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+    
+    // Render text on image
+    let rendered_image = render_text_on_image(
+        base_image,
+        request.text_blocks,
+        &request.render_method,
+        font_data,
+        &request.default_font,
+    )
+    .context("Rendering failed")?;
+    
+    // Convert to PNG buffer
+    let mut png_buffer = Vec::new();
+    rendered_image
+        .write_to(
+            &mut std::io::Cursor::new(&mut png_buffer),
+            image::ImageFormat::Png
+        )
+        .context("Failed to encode PNG")?;
+    
+    tracing::info!("[RUST_EXPORT] Export complete, PNG size: {} bytes", png_buffer.len());
+    
+    Ok(png_buffer)
 }

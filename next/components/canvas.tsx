@@ -15,7 +15,7 @@ import ScaleControl from './scale-control'
 import { useEditorStore } from '@/lib/state'
 
 function Canvas() {
-  const { tool, scale, image, textBlocks, setTextBlocks, inpaintedImage, selectedBlockIndex, setSelectedBlockIndex, currentStage, pipelineStages } = useEditorStore()
+  const { tool, scale, image, textBlocks, setTextBlocks, inpaintedImage, selectedBlockIndex, setSelectedBlockIndex, currentStage, pipelineStages, renderMethod } = useEditorStore()
   const containerRef = useRef<HTMLDivElement>(null)
   const inpaintLayerRef = useRef<Konva.Layer>(null)
 
@@ -53,12 +53,10 @@ function Canvas() {
     setTextBlocks(updated)
   }
 
-  // Determine which base image to display based on currentStage
+  // Determine which base image to display based on currentStage and renderMethod
   const getBaseImage = () => {
-    if (tool === 'inpaint' && inpaintedImage) {
-      return inpaintedImage.bitmap
-    }
-
+    // For inpaint tool, always show the current stage content
+    // Don't override stage selection based on tool
     switch (currentStage) {
       case 'textless':
         return pipelineStages.textless?.bitmap || image?.bitmap || null
@@ -95,7 +93,7 @@ function Canvas() {
               </Layer>
 
               {/* Layer 2: Rectangle fills (render mode, only for 'rectangles' and 'final' stages) */}
-              {shouldShowOverlays && (
+              {shouldShowOverlays && renderMethod === 'rectangle' && (
                 <Layer>
                   {textBlocks?.map((block, index) => {
                     if (!block.backgroundColor) return null
@@ -149,6 +147,8 @@ function Canvas() {
                         fill={`rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`}
                         stroke={outlineColor ? `rgb(${outlineColor.r}, ${outlineColor.g}, ${outlineColor.b})` : undefined}
                         strokeWidth={outlineWidth}
+                        letterSpacing={block.letterSpacing}
+                        lineHeight={block.lineHeight}
                         align='center'
                         verticalAlign='middle'
                         wrap='word'

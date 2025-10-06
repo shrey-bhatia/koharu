@@ -3,14 +3,53 @@
 import { useState, useEffect } from 'react'
 import { Button, Callout, Progress, Select, Badge, Text } from '@radix-ui/themes'
 import { Play, Download, AlertCircle, CheckCircle } from 'lucide-react'
-import { useEditorStore } from '@/lib/state'
+import { useEditorStore } from '../lib/state'
+
+      // Step 2: Get the correct base image} from '@/lib/state'
 import { extractBackgroundColor } from '@/utils/color-extraction'
 import { ensureReadableContrast } from '@/utils/wcag-contrast'
 import { calculateOptimalFontSize } from '@/utils/font-sizing'
 import { calculateImprovedFontSize } from '@/utils/improved-font-sizing'
 import { createImageFromBuffer } from '@/lib/image'
 import { invoke } from '@tauri-apps/api/core'
+import { fileSave } from 'browser-fs-access'
 import RenderCustomization from './render-customization'
+
+// Utility function for creating canvas with OffscreenCanvas fallback
+function createCanvas(width: number, height: number): { canvas: HTMLCanvasElement | OffscreenCanvas, ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D } {
+  if (typeof OffscreenCanvas !== 'undefined') {
+    const canvas = new OffscreenCanvas(width, height)
+    const ctx = canvas.getContext('2d')
+    if (ctx) return { canvas, ctx }
+  }
+  
+  // Fallback to regular canvas
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Failed to get canvas context')
+  return { canvas, ctx }
+}
+
+// Utility function for converting canvas to blob with fallback
+async function canvasToBlob(canvas: HTMLCanvasElement | OffscreenCanvas, options?: { type?: string, quality?: number }): Promise<Blob> {
+  if (canvas instanceof OffscreenCanvas && 'convertToBlob' in canvas) {
+    return await canvas.convertToBlob(options)
+  }
+  
+  // Fallback for HTMLCanvasElement
+  if (canvas instanceof HTMLCanvasElement) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob)
+        else reject(new Error('Failed to convert canvas to blob'))
+      }, options?.type || 'image/png', options?.quality)
+    })
+  }
+  
+  throw new Error('Unsupported canvas type')
+}
 
 interface GpuStatus {
   requested_provider: string
@@ -22,12 +61,13 @@ interface GpuStatus {
 }
 
 export default function RenderPanel() {
-  const { image, textBlocks, setTextBlocks, renderMethod, setRenderMethod, inpaintedImage, setPipelineStage, setCurrentStage, defaultFont, setTool } = useEditorStore()
+  const { image, textBlocks, setTextBlocks, renderMethod, setRenderMethod, inpaintedImage, setPipelineStage, setCurrentStage, defaultFont, setTool, pipelineStages } = useEditorStore()
   const [processing, setProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [selectedBlock, setSelectedBlock] = useState<number | null>(null)
   const [gpuStatus, setGpuStatus] = useState<GpuStatus | null>(null)
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     loadGpuStatus()
@@ -40,6 +80,19 @@ export default function RenderPanel() {
     } catch (err) {
       console.error('Failed to load GPU status:', err)
     }
+  }
+
+  // Get the correct base image based on render method for export
+  const getBaseImageForExport = (): ImageBitmap => {
+    if (renderMethod === 'lama' || renderMethod === 'newlama') {
+      // LaMa/NewLaMa: Use inpainted image
+      return inpaintedImage?.bitmap || image!.bitmap
+    } else if (renderMethod === 'rectangle') {
+      // Rectangle Fill: Use textless or original
+      return pipelineStages.textless?.bitmap || image!.bitmap
+    }
+    // Fallback
+    return image!.bitmap
   }
 
   const processColors = async () => {
@@ -160,6 +213,9 @@ export default function RenderPanel() {
 
       setTextBlocks(updated)
 
+      // Generate final composition and save as pipeline stage
+      await generateFinalComposition()
+
       // Switch to render tool and 'final' stage to show live preview with rendered text
       setTool('render')
       setCurrentStage('final')
@@ -174,26 +230,146 @@ export default function RenderPanel() {
   }
 
   const exportImage = async () => {
-    if (!image) return
+    try {
+      setExporting(true)
+      setError(null)
+
+      if (!image) return
+
+      console.log('[EXPORT] Starting Rust-based export')
+      console.log('[EXPORT] Render method:', renderMethod)
+      console.log('[EXPORT] Text blocks:', textBlocks.length)
+      textBlocks.forEach((block, i) => {
+        console.log(`[EXPORT] Block ${i}:`)
+        console.log(`  - Original text: '${block.text || 'NULL'}'`)
+        console.log(`  - Translated text: '${block.translatedText || 'NULL'}'`)
+        console.log(`  - Font size: ${block.fontSize || 'NULL'}`)
+        console.log(`  - Text color: ${block.textColor ? `rgb(${block.textColor.r},${block.textColor.g},${block.textColor.b})` : 'NULL'}`)
+        console.log(`  - Background color: ${block.backgroundColor ? `rgb(${block.backgroundColor.r},${block.backgroundColor.g},${block.backgroundColor.b})` : 'NULL'}`)
+        console.log(`  - Manual text color: ${block.manualTextColor ? `rgb(${block.manualTextColor.r},${block.manualTextColor.g},${block.manualTextColor.b})` : 'NULL'}`)
+        console.log(`  - Manual bg color: ${block.manualBgColor ? `rgb(${block.manualBgColor.r},${block.manualBgColor.g},${block.manualBgColor.b})` : 'NULL'}`)
+        console.log(`  - Font family: '${block.fontFamily || 'NULL'}'`)
+        console.log(`  - Font weight: '${block.fontWeight || 'NULL'}'`)
+        console.log(`  - Font stretch: '${block.fontStretch || 'NULL'}'`)
+        console.log(`  - Letter spacing: ${block.letterSpacing || 'NULL'}`)
+        console.log(`  - Line height: ${block.lineHeight || 'NULL'}`)
+        console.log(`  - Appearance: ${block.appearance ? 'PRESENT' : 'NULL'}`)
+        console.log(`  - BBox: [${block.xmin}, ${block.ymin}, ${block.xmax}, ${block.ymax}]`)
+      })
+
+      // Step 1: Get the correct base image
+      const baseImageBitmap = getBaseImageForExport()
+      console.log('[EXPORT] Base image:', baseImageBitmap.width, 'x', baseImageBitmap.height)
+
+      // Step 2: Convert ImageBitmap to buffer for Rust
+      const canvas = new OffscreenCanvas(baseImageBitmap.width, baseImageBitmap.height)
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(baseImageBitmap, 0, 0)
+      const blob = await canvas.convertToBlob({ type: 'image/png' })
+      const arrayBuffer = await blob.arrayBuffer()
+      const baseImageBuffer = Array.from(new Uint8Array(arrayBuffer))
+
+      // Step 3: Prepare text blocks for Rust (match Rust struct exactly)
+      const textBlocksForRust = textBlocks.map(block => ({
+        xmin: block.xmin,
+        ymin: block.ymin,
+        xmax: block.xmax,
+        ymax: block.ymax,
+        translatedText: block.translatedText || null,
+        fontSize: block.fontSize || null,
+        textColor: block.textColor || null,
+        backgroundColor: block.backgroundColor || null,
+        manualBgColor: block.manualBgColor || null,
+        manualTextColor: block.manualTextColor || null,
+        fontFamily: block.fontFamily || null,
+        fontWeight: block.fontWeight || null,
+        fontStretch: block.fontStretch || null,
+        letterSpacing: block.letterSpacing || null,
+        lineHeight: block.lineHeight || null,
+        appearance: block.appearance ? {
+          sourceOutlineColor: block.appearance.sourceOutlineColor || null,
+          outlineWidthPx: block.appearance.outlineWidthPx || null,
+        } : null,
+      }))
+
+      console.log('[EXPORT] Prepared textBlocks for Rust:')
+      textBlocksForRust.forEach((block, i) => {
+        console.log(`[EXPORT] Rust Block ${i}:`)
+        console.log(`  - translatedText: '${block.translatedText || 'NULL'}'`)
+        console.log(`  - fontSize: ${block.fontSize || 'NULL'}`)
+        console.log(`  - textColor: ${block.textColor ? `rgb(${block.textColor.r},${block.textColor.g},${block.textColor.b})` : 'NULL'}`)
+        console.log(`  - backgroundColor: ${block.backgroundColor ? `rgb(${block.backgroundColor.r},${block.backgroundColor.g},${block.backgroundColor.b})` : 'NULL'}`)
+        console.log(`  - BBox: [${block.xmin}, ${block.ymin}, ${block.xmax}, ${block.ymax}]`)
+      })
+
+      // Show debug info in UI alert for testing
+      const debugInfo = textBlocksForRust.map((block, i) => 
+        `Block ${i}: translatedText='${block.translatedText || 'NULL'}', fontSize=${block.fontSize || 'NULL'}`
+      ).join('\n')
+      alert(`DEBUG: TextBlocks being sent to Rust:\n\n${debugInfo}`)
+
+      console.log('[EXPORT] Calling Rust render_and_export_image...')
+
+      // Step 4: Call Rust backend
+      const pngBuffer: number[] = await invoke('render_and_export_image', {
+        request: {
+          baseImageBuffer,
+          textBlocks: textBlocksForRust,
+          renderMethod,
+          defaultFont,
+        },
+      })
+
+      console.log('[EXPORT] Rust rendering complete, buffer size:', pngBuffer.length)
+
+      // Step 5: Convert buffer to Blob and save
+      const exportBlob = new Blob([new Uint8Array(pngBuffer)], { type: 'image/png' })
+
+      await fileSave(exportBlob, {
+        fileName: `translated-manga-${Date.now()}.png`,
+        extensions: ['.png'],
+        description: 'PNG Image',
+      })
+
+      console.log('[EXPORT] Image exported successfully!')
+    } catch (err) {
+      console.error('[EXPORT] Error:', err)
+      setError(err instanceof Error ? err.message : 'Failed to export image')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  // Generate final composition and save as pipeline stage
+  const generateFinalComposition = async () => {
+    if (!image) return null
 
     try {
+      console.log('[FINAL_COMP] Generating final composition')
       // Create offscreen canvas at original resolution
-      const canvas = new OffscreenCanvas(image.bitmap.width, image.bitmap.height)
-      const ctx = canvas.getContext('2d')
-      if (!ctx) throw new Error('Failed to get canvas context')
+      const { canvas, ctx } = createCanvas(image.bitmap.width, image.bitmap.height)
 
       // Determine base image based on render method
-      const baseImage = (renderMethod === 'lama' || renderMethod === 'newlama') && inpaintedImage
-        ? inpaintedImage.bitmap
-        : image.bitmap
+      let baseImage: ImageBitmap
+      if (renderMethod === 'lama' || renderMethod === 'newlama') {
+        // LaMa/NewLaMa methods use inpainted image
+        baseImage = inpaintedImage?.bitmap || image.bitmap
+        console.log(`[FINAL_COMP] Using ${inpaintedImage ? 'inpainted' : 'original'} image for LaMa/NewLaMa`)
+      } else if (renderMethod === 'rectangle') {
+        // Rectangle Fill method uses textless image if available, otherwise original
+        baseImage = pipelineStages.textless?.bitmap || image.bitmap
+        console.log(`[FINAL_COMP] Using ${pipelineStages.textless ? 'textless' : 'original'} image for Rectangle Fill`)
+      } else {
+        // Fallback to original image
+        baseImage = image.bitmap
+        console.log('[FINAL_COMP] Using original image (fallback)')
+      }
 
       // 1. Draw base image (original or textless)
       ctx.drawImage(baseImage, 0, 0)
 
-      // PIPELINE SAFETY GUARDRAIL #2: Draw rectangles ONLY for Rectangle Fill mode
-      // LaMa/NewLaMa modes render text directly over textless plate
+      // 2. Draw rectangles ONLY for Rectangle Fill mode
       if (renderMethod === 'rectangle') {
-        console.log('[PIPELINE] Drawing rectangles for Rectangle Fill mode')
         for (const block of textBlocks) {
           if (!block.backgroundColor) continue
 
@@ -206,20 +382,26 @@ export default function RenderPanel() {
 
           ctx.fillStyle = `rgb(${bg.r}, ${bg.g}, ${bg.b})`
           ctx.beginPath()
-          ctx.roundRect(x, y, width, height, radius)
+          
+          // Draw rounded rect manually (roundRect not universally supported)
+          ctx.moveTo(x + radius, y)
+          ctx.lineTo(x + width - radius, y)
+          ctx.quadraticCurveTo(x + width, y, x + width, y + radius)
+          ctx.lineTo(x + width, y + height - radius)
+          ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height)
+          ctx.lineTo(x + radius, y + height)
+          ctx.quadraticCurveTo(x, y + height, x, y + height - radius)
+          ctx.lineTo(x, y + radius)
+          ctx.quadraticCurveTo(x, y, x + radius, y)
+          ctx.closePath()
+          
           ctx.fill()
         }
-      } else {
-        console.log('[PIPELINE] Skipping rectangles for LaMa/NewLaMa mode (using textless plate)')
       }
 
-      // Save 'withRectangles' stage (base + backgrounds, no text yet)
-      const rectanglesBlob = await canvas.convertToBlob({ type: 'image/png' })
-      const rectanglesBuffer = await rectanglesBlob.arrayBuffer()
-      const rectanglesStage = await createImageFromBuffer(rectanglesBuffer)
-      setPipelineStage('withRectangles', rectanglesStage)
-
-      // 3. Draw translated text with advanced typography support and proper wrapping
+      // 3. Draw translated text with Canvas 2D API (simple and reliable)
+      console.log(`[FINAL_COMP] Drawing text for ${textBlocks.length} blocks using Canvas 2D`)
+      
       for (const block of textBlocks) {
         if (!block.translatedText || !block.fontSize || !block.textColor) continue
 
@@ -231,7 +413,6 @@ export default function RenderPanel() {
         const lineHeightMultiplier = block.lineHeight || 1.2
 
         ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
-        ctx.letterSpacing = `${letterSpacing}px`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
 
@@ -252,6 +433,50 @@ export default function RenderPanel() {
         const centerX = (block.xmin + block.xmax) / 2
         const centerY = (block.ymin + block.ymax) / 2
 
+        // Helper function to measure text width with manual letter spacing
+        const measureTextWithSpacing = (text: string): number => {
+          if (letterSpacing === 0) {
+            return ctx.measureText(text).width
+          }
+          let totalWidth = 0
+          for (let i = 0; i < text.length; i++) {
+            totalWidth += ctx.measureText(text[i]).width
+            if (i < text.length - 1) totalWidth += letterSpacing
+          }
+          return totalWidth
+        }
+
+        // Helper function to draw text with manual letter spacing
+        const drawTextWithSpacing = (text: string, x: number, y: number, isStroke: boolean = false) => {
+          if (letterSpacing === 0) {
+            // Simple case: no letter spacing, use normal text rendering
+            if (isStroke) {
+              ctx.strokeText(text, x, y, maxWidth)
+            } else {
+              ctx.fillText(text, x, y, maxWidth)
+            }
+            return
+          }
+          
+          // Complex case: manual letter spacing
+          const totalWidth = measureTextWithSpacing(text)
+          let currentX = x - totalWidth / 2
+          
+          for (let i = 0; i < text.length; i++) {
+            const char = text[i]
+            const charWidth = ctx.measureText(char).width
+            const charCenterX = currentX + charWidth / 2
+            
+            if (isStroke) {
+              ctx.strokeText(char, charCenterX, y)
+            } else {
+              ctx.fillText(char, charCenterX, y)
+            }
+            
+            currentX += charWidth + letterSpacing
+          }
+        }
+
         // Wrap text to fit within box width
         const words = block.translatedText.split(' ')
         const lines: string[] = []
@@ -259,9 +484,9 @@ export default function RenderPanel() {
 
         for (const word of words) {
           const testLine = currentLine + (currentLine ? ' ' : '') + word
-          const metrics = ctx.measureText(testLine)
+          const testWidth = measureTextWithSpacing(testLine)
 
-          if (metrics.width > maxWidth && currentLine !== '') {
+          if (testWidth > maxWidth && currentLine !== '') {
             lines.push(currentLine)
             currentLine = word
           } else {
@@ -283,35 +508,24 @@ export default function RenderPanel() {
 
           // Draw outline first (if present)
           if (hasOutline) {
-            ctx.strokeText(line, centerX, y, maxWidth)
+            drawTextWithSpacing(line, centerX, y, true) // true = stroke
           }
 
           // Then draw fill on top
-          ctx.fillText(line, centerX, y, maxWidth)
+          drawTextWithSpacing(line, centerX, y, false) // false = fill
         })
       }
 
-      // 4. Save final stage and export as PNG
-      const finalBlob = await canvas.convertToBlob({ type: 'image/png', quality: 1.0 })
+      // Save final stage
+      const finalBlob = await canvasToBlob(canvas, { type: 'image/png', quality: 1.0 })
       const finalBuffer = await finalBlob.arrayBuffer()
       const finalStage = await createImageFromBuffer(finalBuffer)
       setPipelineStage('final', finalStage)
-      setCurrentStage('final')
 
-      const url = URL.createObjectURL(finalBlob)
-
-      // 5. Trigger download
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `translated-manga-${Date.now()}.png`
-      a.click()
-
-      URL.revokeObjectURL(url)
-
-      console.log('Image exported successfully!')
+      return finalStage
     } catch (err) {
-      console.error('Export error:', err)
-      setError(err instanceof Error ? err.message : 'Failed to export image')
+      console.error('Failed to generate final composition:', err)
+      return null
     }
   }
 

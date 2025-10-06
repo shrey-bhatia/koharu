@@ -9,7 +9,7 @@ import SettingsDialog from './settings-dialog'
 import DetectionControls from './detection-controls'
 
 function Topbar() {
-  const { setImage, theme, setTheme, tool, currentStage, setCurrentStage, pipelineStages } = useEditorStore()
+  const { setImage, theme, setTheme, tool, currentStage, setCurrentStage, pipelineStages, renderMethod } = useEditorStore()
 
   const handleOpenImage = async () => {
     try {
@@ -48,25 +48,33 @@ function Topbar() {
         {/* Pipeline Stage Viewer */}
         {(tool === 'render' || tool === 'inpaint') && (
           <div className='flex items-center gap-1'>
-            {(['original', 'textless', 'rectangles', 'final'] as const).map((stage) => {
-              const stageName = stage === 'rectangles' ? 'withRectangles' : stage
-              const hasStage = stage === 'original' || pipelineStages[stageName as keyof typeof pipelineStages] !== null
-              const isActive = currentStage === stage
+            {(['original', 'textless', 'rectangles', 'final'] as const)
+              .filter(stage => {
+                // Hide +Backgrounds stage for LaMa/NewLaMa methods since rectangles don't apply
+                if (stage === 'rectangles' && (renderMethod === 'lama' || renderMethod === 'newlama')) {
+                  return false
+                }
+                return true
+              })
+              .map((stage) => {
+                const stageName = stage === 'rectangles' ? 'withRectangles' : stage
+                const hasStage = stage === 'original' || pipelineStages[stageName as keyof typeof pipelineStages] !== null
+                const isActive = currentStage === stage
 
-              return (
-                <Button
-                  key={stage}
-                  size='1'
-                  variant={isActive ? 'solid' : 'soft'}
-                  color={isActive ? 'blue' : 'gray'}
-                  disabled={!hasStage}
-                  onClick={() => setCurrentStage(stage)}
-                >
-                  {stageLabels[stage]}
-                  {!hasStage && <Badge size='1' color='gray' ml='1'>-</Badge>}
-                </Button>
-              )
-            })}
+                return (
+                  <Button
+                    key={stage}
+                    size='1'
+                    variant={isActive ? 'solid' : 'soft'}
+                    color={isActive ? 'blue' : 'gray'}
+                    disabled={!hasStage}
+                    onClick={() => setCurrentStage(stage)}
+                  >
+                    {stageLabels[stage]}
+                    {!hasStage && <Badge size='1' color='gray' ml='1'>-</Badge>}
+                  </Button>
+                )
+              })}
           </div>
         )}
       </div>
