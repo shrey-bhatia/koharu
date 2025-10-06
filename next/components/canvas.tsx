@@ -55,15 +55,8 @@ function Canvas() {
 
   // Determine which base image to display based on currentStage and renderMethod
   const getBaseImage = () => {
-    if (tool === 'inpaint' && inpaintedImage) {
-      return inpaintedImage.bitmap
-    }
-
-    // For LaMa/NewLaMa render methods in render tool, use inpainted image as base when available
-    if (tool === 'render' && (renderMethod === 'lama' || renderMethod === 'newlama') && inpaintedImage) {
-      return inpaintedImage.bitmap
-    }
-
+    // For inpaint tool, always show the current stage content
+    // Don't override stage selection based on tool
     switch (currentStage) {
       case 'textless':
         return pipelineStages.textless?.bitmap || image?.bitmap || null

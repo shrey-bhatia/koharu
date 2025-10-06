@@ -22,12 +22,13 @@ interface GpuStatus {
 }
 
 export default function RenderPanel() {
-  const { image, textBlocks, setTextBlocks, renderMethod, setRenderMethod, inpaintedImage, setPipelineStage, setCurrentStage, defaultFont, setTool } = useEditorStore()
+  const { image, textBlocks, setTextBlocks, renderMethod, setRenderMethod, inpaintedImage, setPipelineStage, setCurrentStage, defaultFont, setTool, pipelineStages } = useEditorStore()
   const [processing, setProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [selectedBlock, setSelectedBlock] = useState<number | null>(null)
   const [gpuStatus, setGpuStatus] = useState<GpuStatus | null>(null)
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     loadGpuStatus()
@@ -160,6 +161,9 @@ export default function RenderPanel() {
 
       setTextBlocks(updated)
 
+      // Generate final composition and save as pipeline stage
+      await generateFinalComposition()
+
       // Switch to render tool and 'final' stage to show live preview with rendered text
       setTool('render')
       setCurrentStage('final')
@@ -174,26 +178,239 @@ export default function RenderPanel() {
   }
 
   const exportImage = async () => {
-    if (!image) return
+    try {
+      setExporting(true)
+      setError(null)
+
+      // Check if we already have a final composition
+      const existingFinalStage = pipelineStages.final
+      if (existingFinalStage) {
+        console.log('[EXPORT] Using existing final stage for export')
+        // Use existing final stage for export
+        const blob = new Blob([existingFinalStage.buffer], { type: 'image/png' })
+        const url = URL.createObjectURL(blob)
+        
+        // Trigger download
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `translated-manga-${Date.now()}.png`
+        a.click()
+
+        URL.revokeObjectURL(url)
+        console.log('Image exported successfully (using existing final composition)!')
+        return
+      }
+
+      console.log('[EXPORT] No existing final stage, creating new one')
+      // If no existing final stage, create one (original export logic)
+      if (!image) return
+
+      try {
+        // Create offscreen canvas at original resolution
+        const canvas = new OffscreenCanvas(image.bitmap.width, image.bitmap.height)
+        const ctx = canvas.getContext('2d')
+        if (!ctx) throw new Error('Failed to get canvas context')
+
+        // Determine base image based on render method
+        let baseImage: ImageBitmap
+        if (renderMethod === 'lama' || renderMethod === 'newlama') {
+          // LaMa/NewLaMa methods use inpainted image
+          baseImage = inpaintedImage?.bitmap || image.bitmap
+        } else if (renderMethod === 'rectangle') {
+          // Rectangle Fill method uses textless image if available, otherwise original
+          baseImage = pipelineStages.textless?.bitmap || image.bitmap
+        } else {
+          // Fallback to original image
+          baseImage = image.bitmap
+        }
+
+        // 1. Draw base image (original or textless)
+        console.log('[EXPORT] Drawing base image')
+        ctx.drawImage(baseImage, 0, 0)
+
+        // Check if text drawing will work
+        console.log('[EXPORT] Testing text drawing context')
+        ctx.fillStyle = 'red'
+        ctx.font = '20px Arial'
+        ctx.fillText('TEST TEXT', 50, 50)
+        console.log('[EXPORT] Test text drawn')
+
+        // PIPELINE SAFETY GUARDRAIL #2: Draw rectangles ONLY for Rectangle Fill mode
+        // LaMa/NewLaMa modes render text directly over textless plate
+        if (renderMethod === 'rectangle') {
+          console.log('[PIPELINE] Drawing rectangles for Rectangle Fill mode')
+          for (const block of textBlocks) {
+            if (!block.backgroundColor) continue
+
+            const bg = block.manualBgColor || block.backgroundColor
+            const x = block.xmin
+            const y = block.ymin
+            const width = block.xmax - block.xmin
+            const height = block.ymax - block.ymin
+            const radius = 5
+
+            ctx.fillStyle = `rgb(${bg.r}, ${bg.g}, ${bg.b})`
+            ctx.beginPath()
+            ctx.roundRect(x, y, width, height, radius)
+            ctx.fill()
+          }
+        } else {
+          console.log('[PIPELINE] Skipping rectangles for LaMa/NewLaMa mode (using textless plate)')
+        }
+
+        // Save 'withRectangles' stage (base + backgrounds, no text yet)
+        const rectanglesBlob = await canvas.convertToBlob({ type: 'image/png' })
+        const rectanglesBuffer = await rectanglesBlob.arrayBuffer()
+        const rectanglesStage = await createImageFromBuffer(rectanglesBuffer)
+        setPipelineStage('withRectangles', rectanglesStage)
+
+        // 3. Draw translated text with advanced typography support and proper wrapping
+        console.log(`[EXPORT] Drawing text for ${textBlocks.length} blocks`)
+        for (const block of textBlocks) {
+          if (!block.translatedText || !block.fontSize || !block.textColor) {
+            console.log(`[EXPORT] Skipping block - missing text or styling`)
+            continue
+          }
+
+          console.log(`[EXPORT] Drawing text for block: "${block.translatedText}"`)
+
+          const textColor = block.manualTextColor || block.textColor
+          const fontFamily = block.fontFamily || defaultFont
+          const fontWeight = block.fontWeight || 'normal'
+          const fontStretch = block.fontStretch || 'normal'
+          const letterSpacing = block.letterSpacing || 0
+          const lineHeightMultiplier = block.lineHeight || 1.2
+
+          ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
+          ctx.letterSpacing = `${letterSpacing}px`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+
+          // Configure outline if available from appearance analysis
+          const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
+          if (hasOutline) {
+            ctx.strokeStyle = `rgb(${block.appearance.sourceOutlineColor.r}, ${block.appearance.sourceOutlineColor.g}, ${block.appearance.sourceOutlineColor.b})`
+            ctx.lineWidth = block.appearance.outlineWidthPx
+            ctx.lineJoin = 'round'
+            ctx.miterLimit = 2
+          }
+
+          ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
+
+          const boxWidth = block.xmax - block.xmin
+          const boxHeight = block.ymax - block.ymin
+          const maxWidth = boxWidth * 0.9 // 10% padding
+          const centerX = (block.xmin + block.xmax) / 2
+          const centerY = (block.ymin + block.ymax) / 2
+
+          // Wrap text to fit within box width
+          const words = block.translatedText.split(' ')
+          const lines: string[] = []
+          let currentLine = ''
+
+          for (const word of words) {
+            const testLine = currentLine + (currentLine ? ' ' : '') + word
+            const metrics = ctx.measureText(testLine)
+
+            if (metrics.width > maxWidth && currentLine !== '') {
+              lines.push(currentLine)
+              currentLine = word
+            } else {
+              currentLine = testLine
+            }
+          }
+          if (currentLine) lines.push(currentLine)
+
+          const lineHeight = block.fontSize * lineHeightMultiplier
+          const totalHeight = lines.length * lineHeight
+
+          // Start from top if text is too tall, otherwise center vertically
+          const startY = totalHeight > boxHeight * 0.9
+            ? block.ymin + lineHeight / 2
+            : centerY - ((lines.length - 1) * lineHeight) / 2
+
+          lines.forEach((line, i) => {
+            const y = startY + i * lineHeight
+
+            // Draw outline first (if present)
+            if (hasOutline) {
+              ctx.strokeText(line, centerX, y, maxWidth)
+            }
+
+            // Then draw fill on top
+            ctx.fillText(line, centerX, y, maxWidth)
+          })
+        }
+
+        // 4. Save final stage and export as PNG
+        const finalBlob = await canvas.convertToBlob({ type: 'image/png', quality: 1.0 })
+        const finalBuffer = await finalBlob.arrayBuffer()
+        const finalStage = await createImageFromBuffer(finalBuffer)
+        setPipelineStage('final', finalStage)
+        setCurrentStage('final')
+
+        const url = URL.createObjectURL(finalBlob)
+
+        // 5. Trigger download
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `translated-manga-${Date.now()}.png`
+        a.click()
+
+        URL.revokeObjectURL(url)
+
+        console.log('Image exported successfully!')
+      } catch (err) {
+        console.error('Export error:', err)
+        setError(err instanceof Error ? err.message : 'Failed to export image')
+      } finally {
+        setExporting(false)
+      }
+    } catch (err) {
+      console.error('Export error:', err)
+      setError(err instanceof Error ? err.message : 'Failed to export image')
+    }
+  }
+
+  // Generate final composition and save as pipeline stage
+  const generateFinalComposition = async () => {
+    if (!image) return null
 
     try {
+      console.log('[FINAL_COMP] Generating final composition')
       // Create offscreen canvas at original resolution
       const canvas = new OffscreenCanvas(image.bitmap.width, image.bitmap.height)
       const ctx = canvas.getContext('2d')
       if (!ctx) throw new Error('Failed to get canvas context')
 
       // Determine base image based on render method
-      const baseImage = (renderMethod === 'lama' || renderMethod === 'newlama') && inpaintedImage
-        ? inpaintedImage.bitmap
-        : image.bitmap
+      let baseImage: ImageBitmap
+      if (renderMethod === 'lama' || renderMethod === 'newlama') {
+        // LaMa/NewLaMa methods use inpainted image
+        baseImage = inpaintedImage?.bitmap || image.bitmap
+        console.log(`[FINAL_COMP] Using ${inpaintedImage ? 'inpainted' : 'original'} image for LaMa/NewLaMa`)
+      } else if (renderMethod === 'rectangle') {
+        // Rectangle Fill method uses textless image if available, otherwise original
+        baseImage = pipelineStages.textless?.bitmap || image.bitmap
+        console.log(`[FINAL_COMP] Using ${pipelineStages.textless ? 'textless' : 'original'} image for Rectangle Fill`)
+      } else {
+        // Fallback to original image
+        baseImage = image.bitmap
+        console.log('[FINAL_COMP] Using original image (fallback)')
+      }
 
       // 1. Draw base image (original or textless)
       ctx.drawImage(baseImage, 0, 0)
 
-      // PIPELINE SAFETY GUARDRAIL #2: Draw rectangles ONLY for Rectangle Fill mode
-      // LaMa/NewLaMa modes render text directly over textless plate
+      // Check if text drawing will work
+      console.log('[FINAL_COMP] Testing text drawing context')
+      ctx.fillStyle = 'red'
+      ctx.font = '20px Arial'
+      ctx.fillText('TEST TEXT', 50, 50)
+      console.log('[FINAL_COMP] Test text drawn')
+
+      // 2. Draw rectangles ONLY for Rectangle Fill mode
       if (renderMethod === 'rectangle') {
-        console.log('[PIPELINE] Drawing rectangles for Rectangle Fill mode')
         for (const block of textBlocks) {
           if (!block.backgroundColor) continue
 
@@ -209,19 +426,17 @@ export default function RenderPanel() {
           ctx.roundRect(x, y, width, height, radius)
           ctx.fill()
         }
-      } else {
-        console.log('[PIPELINE] Skipping rectangles for LaMa/NewLaMa mode (using textless plate)')
       }
 
-      // Save 'withRectangles' stage (base + backgrounds, no text yet)
-      const rectanglesBlob = await canvas.convertToBlob({ type: 'image/png' })
-      const rectanglesBuffer = await rectanglesBlob.arrayBuffer()
-      const rectanglesStage = await createImageFromBuffer(rectanglesBuffer)
-      setPipelineStage('withRectangles', rectanglesStage)
-
       // 3. Draw translated text with advanced typography support and proper wrapping
+      console.log(`[FINAL_COMP] Drawing text for ${textBlocks.length} blocks`)
       for (const block of textBlocks) {
-        if (!block.translatedText || !block.fontSize || !block.textColor) continue
+        if (!block.translatedText || !block.fontSize || !block.textColor) {
+          console.log(`[FINAL_COMP] Skipping block - missing text or styling`)
+          continue
+        }
+
+        console.log(`[FINAL_COMP] Drawing text for block: "${block.translatedText}"`)
 
         const textColor = block.manualTextColor || block.textColor
         const fontFamily = block.fontFamily || defaultFont
@@ -291,27 +506,16 @@ export default function RenderPanel() {
         })
       }
 
-      // 4. Save final stage and export as PNG
+      // Save final stage
       const finalBlob = await canvas.convertToBlob({ type: 'image/png', quality: 1.0 })
       const finalBuffer = await finalBlob.arrayBuffer()
       const finalStage = await createImageFromBuffer(finalBuffer)
       setPipelineStage('final', finalStage)
-      setCurrentStage('final')
 
-      const url = URL.createObjectURL(finalBlob)
-
-      // 5. Trigger download
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `translated-manga-${Date.now()}.png`
-      a.click()
-
-      URL.revokeObjectURL(url)
-
-      console.log('Image exported successfully!')
+      return finalStage
     } catch (err) {
-      console.error('Export error:', err)
-      setError(err instanceof Error ? err.message : 'Failed to export image')
+      console.error('Failed to generate final composition:', err)
+      return null
     }
   }
 
