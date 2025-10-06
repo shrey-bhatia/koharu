@@ -58,11 +58,11 @@ pub fn render_text_on_image(
     default_font: &str,
 ) -> anyhow::Result<DynamicImage> {
     let mut img = base_image.to_rgba8();
-    
+
     // Load font using ab_glyph
     let font = FontArc::try_from_vec(font_data.to_vec())
         .map_err(|_| anyhow::anyhow!("Failed to load font"))?;
-    
+
     // Step 1: Draw rectangles ONLY for Rectangle Fill mode
     // (lama/newlama render text directly over inpainted image)
     if render_method == "rectangle" {
@@ -71,11 +71,11 @@ pub fn render_text_on_image(
             if block.background_color.is_none() && block.manual_bg_color.is_none() {
                 continue;
             }
-            
+
             let bg_color = block.manual_bg_color.as_ref()
                 .or(block.background_color.as_ref())
                 .unwrap();
-            
+
             draw_rounded_rectangle(
                 &mut img,
                 block.xmin,
@@ -89,25 +89,41 @@ pub fn render_text_on_image(
     } else {
         tracing::info!("[RUST_EXPORT] Skipping rectangles for LaMa/NewLaMa mode");
     }
-    
-    // Step 2: Draw translated text
+
+    // Step 2: Draw debug text in 4 corners with different methods
+    let (width, height) = img.dimensions();
+    let debug_text = "DEBUG TEXT";
+
+    // Method 1: Red text in top-left (current method)
+    draw_debug_text_method1(&mut img, &font, debug_text, width, height)?;
+
+    // Method 2: Black text in top-right (simple draw_text_mut)
+    draw_debug_text_method2(&mut img, &font, debug_text, width, height)?;
+
+    // Method 3: Yellow text in bottom-left (different scaling)
+    draw_debug_text_method3(&mut img, &font, debug_text, width, height)?;
+
+    // Method 4: Blue text in bottom-right (character-by-character)
+    draw_debug_text_method4(&mut img, &font, debug_text, width, height)?;
+
+    // Step 3: Draw translated text (original logic)
     tracing::info!("[RUST_EXPORT] Drawing text for {} blocks", text_blocks.len());
-    
+
     for (i, block) in text_blocks.iter().enumerate() {
         // Skip blocks without required properties (same as JS logic)
         if block.translated_text.is_none() || block.font_size.is_none() {
             tracing::debug!("[RUST_EXPORT] Skipping block {}: missing text or fontSize", i);
             continue;
         }
-        
+
         let text_color_opt = block.manual_text_color.as_ref()
             .or(block.text_color.as_ref());
-        
+
         if text_color_opt.is_none() {
             tracing::debug!("[RUST_EXPORT] Skipping block {}: missing textColor", i);
             continue;
         }
-        
+
         let translated_text = block.translated_text.as_ref().unwrap();
         let font_size = block.font_size.unwrap();
         let text_color = text_color_opt.unwrap();
@@ -116,15 +132,15 @@ pub fn render_text_on_image(
             .unwrap_or(default_font);
         let letter_spacing = block.letter_spacing.unwrap_or(0.0);
         let line_height_multiplier = block.line_height.unwrap_or(1.2);
-        
+
         tracing::debug!("[RUST_EXPORT] Drawing block {}: '{}' font={} size={}",
             i, &translated_text[..translated_text.len().min(30)], font_family, font_size);
-        
+
         // Check for outline
         let has_outline = block.appearance.as_ref()
             .and_then(|a| a.source_outline_color.as_ref().zip(a.outline_width_px))
             .is_some();
-        
+
         draw_text_block(
             &mut img,
             block,
@@ -137,7 +153,7 @@ pub fn render_text_on_image(
             has_outline,
         )?;
     }
-    
+
     Ok(DynamicImage::ImageRgba8(img))
 }
 
@@ -431,16 +447,103 @@ fn draw_text_with_spacing_and_outline(
     }
 }
 
+// Debug methods for testing different rendering approaches
+// Method 1: Red text in top-left (using current draw_text_block approach)
+fn draw_debug_text_method1(
+    img: &mut RgbaImage,
+    font: &FontArc,
+    text: &str,
+    img_width: u32,
+    img_height: u32,
+) -> anyhow::Result<()> {
+    let scale = PxScale::from(24.0);
+    let x = 20;
+    let y = 30;
+    let color = Rgba([255, 0, 0, 255]); // Red
+    
+    draw_text_mut(img, color, x, y, scale, font, text);
+    Ok(())
+}
+
+// Method 2: Black text in top-right (simple draw_text_mut)
+fn draw_debug_text_method2(
+    img: &mut RgbaImage,
+    font: &FontArc,
+    text: &str,
+    img_width: u32,
+    img_height: u32,
+) -> anyhow::Result<()> {
+    let scale = PxScale::from(24.0);
+    let text_width = measure_text_width(text, font, scale);
+    let x = (img_width as i32) - (text_width as i32) - 20;
+    let y = 30;
+    let color = Rgba([0, 0, 0, 255]); // Black
+    
+    draw_text_mut(img, color, x, y, scale, font, text);
+    Ok(())
+}
+
+// Method 3: Yellow text in bottom-left (different scaling approach)
+fn draw_debug_text_method3(
+    img: &mut RgbaImage,
+    font: &FontArc,
+    text: &str,
+    img_width: u32,
+    img_height: u32,
+) -> anyhow::Result<()> {
+    let scale = PxScale::from(20.0);
+    let x = 20;
+    let y = (img_height as i32) - 50;
+    let color = Rgba([255, 255, 0, 255]); // Yellow
+    
+    // Draw background rectangle first
+    for dy in 0..30 {
+        for dx in 0..200 {
+            let px = x + dx;
+            let py = y + dy;
+            if px < img_width as i32 && py < img_height as i32 && px >= 0 && py >= 0 {
+                img.put_pixel(px as u32, py as u32, Rgba([0, 0, 0, 128]));
+            }
+        }
+    }
+    
+    draw_text_mut(img, color, x, y, scale, font, text);
+    Ok(())
+}
+
+// Method 4: Blue text in bottom-right (character-by-character drawing)
+fn draw_debug_text_method4(
+    img: &mut RgbaImage,
+    font: &FontArc,
+    text: &str,
+    img_width: u32,
+    img_height: u32,
+) -> anyhow::Result<()> {
+    let scale = PxScale::from(24.0);
+    let color = Rgba([0, 0, 255, 255]); // Blue
+    let mut current_x = (img_width as i32) - 20;
+    let y = (img_height as i32) - 30;
+    
+    // Draw from right to left, character by character
+    for c in text.chars().rev() {
+        let char_str = c.to_string();
+        let char_width = measure_text_width(&char_str, font, scale);
+        current_x -= char_width as i32;
+        
+        draw_text_mut(img, color, current_x, y, scale, font, &char_str);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     
     #[test]
     fn test_measure_text_width() {
-        // Test with sample font
-        let font_data = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
-        let font = Font::try_from_bytes(font_data as &[u8]).unwrap();
-        let scale = Scale::uniform(16.0);
+        let font_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+        let font = FontArc::try_from_vec(font_data.to_vec()).unwrap();
+        let scale = PxScale::from(16.0);
         
         let width = measure_text_width("Hello", &font, scale);
         assert!(width > 0.0);
@@ -448,14 +551,13 @@ mod tests {
     
     #[test]
     fn test_measure_text_width_with_spacing() {
-        let font_data = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
-        let font = Font::try_from_bytes(font_data as &[u8]).unwrap();
-        let scale = Scale::uniform(16.0);
+        let font_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+        let font = FontArc::try_from_vec(font_data.to_vec()).unwrap();
+        let scale = PxScale::from(16.0);
         
         let width_no_spacing = measure_text_width("Hello", &font, scale);
         let width_with_spacing = measure_text_width_with_spacing("Hello", &font, scale, 5.0);
         
-        // With spacing should be wider (5 chars = 4 spaces * 5px = 20px extra)
         assert!(width_with_spacing > width_no_spacing + 15.0);
     }
 }

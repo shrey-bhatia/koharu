@@ -80,6 +80,19 @@ export default function RenderPanel() {
     }
   }
 
+  // Get the correct base image based on render method for export
+  const getBaseImageForExport = (): ImageBitmap => {
+    if (renderMethod === 'lama' || renderMethod === 'newlama') {
+      // LaMa/NewLaMa: Use inpainted image
+      return inpaintedImage?.bitmap || image!.bitmap
+    } else if (renderMethod === 'rectangle') {
+      // Rectangle Fill: Use textless or original
+      return pipelineStages.textless?.bitmap || image!.bitmap
+    }
+    // Fallback
+    return image!.bitmap
+  }
+
   const processColors = async () => {
     if (!image) {
       setError('No image loaded')
@@ -219,245 +232,76 @@ export default function RenderPanel() {
       setExporting(true)
       setError(null)
 
-      // Check if we already have a final composition
-      const existingFinalStage = pipelineStages.final
-      if (existingFinalStage) {
-        console.log('[EXPORT] Using existing final stage for export')
-        // Use existing final stage for export
-        const blob = new Blob([existingFinalStage.buffer], { type: 'image/png' })
-        
-        // Use browser-fs-access for cross-platform file save (works in browser and Tauri)
-        await fileSave(blob, {
-          fileName: `translated-manga-${Date.now()}.png`,
-          extensions: ['.png'],
-          description: 'PNG Image',
-        })
-        
-        console.log('Image exported successfully (using existing final composition)!')
-        return
-      }
-
-      console.log('[EXPORT] No existing final stage, creating new one')
-      // If no existing final stage, create one (original export logic)
       if (!image) return
 
-      try {
-        console.log('[EXPORT] Creating canvas:', image.bitmap.width, 'x', image.bitmap.height)
-        // Create canvas at original resolution using utility function
-        const { canvas, ctx } = createCanvas(image.bitmap.width, image.bitmap.height)
-        console.log('[EXPORT] Canvas created, type:', canvas.constructor.name, 'Context type:', ctx.constructor.name)
+      console.log('[EXPORT] Starting Rust-based export')
+      console.log('[EXPORT] Render method:', renderMethod)
+      console.log('[EXPORT] Text blocks:', textBlocks.length)
 
-        // Determine base image based on render method
-        let baseImage: ImageBitmap
-        if (renderMethod === 'lama' || renderMethod === 'newlama') {
-          // LaMa/NewLaMa methods use inpainted image
-          baseImage = inpaintedImage?.bitmap || image.bitmap
-        } else if (renderMethod === 'rectangle') {
-          // Rectangle Fill method uses textless image if available, otherwise original
-          baseImage = pipelineStages.textless?.bitmap || image.bitmap
-        } else {
-          // Fallback to original image
-          baseImage = image.bitmap
-        }
+      // Step 1: Get the correct base image
+      const baseImageBitmap = getBaseImageForExport()
+      console.log('[EXPORT] Base image:', baseImageBitmap.width, 'x', baseImageBitmap.height)
 
-        // 1. Draw base image (original or textless)
-        console.log('[EXPORT] Drawing base image')
-        ctx.drawImage(baseImage, 0, 0)
+      // Step 2: Convert ImageBitmap to buffer for Rust
+      const canvas = new OffscreenCanvas(baseImageBitmap.width, baseImageBitmap.height)
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(baseImageBitmap, 0, 0)
+      const blob = await canvas.convertToBlob({ type: 'image/png' })
+      const arrayBuffer = await blob.arrayBuffer()
+      const baseImageBuffer = Array.from(new Uint8Array(arrayBuffer))
 
-        // PIPELINE SAFETY GUARDRAIL #2: Draw rectangles ONLY for Rectangle Fill mode
-        // LaMa/NewLaMa modes render text directly over textless plate
-        if (renderMethod === 'rectangle') {
-          console.log('[PIPELINE] Drawing rectangles for Rectangle Fill mode')
-          for (const block of textBlocks) {
-            if (!block.backgroundColor) continue
+      // Step 3: Prepare text blocks for Rust (match Rust struct exactly)
+      const textBlocksForRust = textBlocks.map(block => ({
+        xmin: block.xmin,
+        ymin: block.ymin,
+        xmax: block.xmax,
+        ymax: block.ymax,
+        translated_text: block.translatedText || null,
+        font_size: block.fontSize || null,
+        text_color: block.textColor || null,
+        background_color: block.backgroundColor || null,
+        manual_bg_color: block.manualBgColor || null,
+        manual_text_color: block.manualTextColor || null,
+        font_family: block.fontFamily || null,
+        font_weight: block.fontWeight || null,
+        font_stretch: block.fontStretch || null,
+        letter_spacing: block.letterSpacing || null,
+        line_height: block.lineHeight || null,
+        appearance: block.appearance ? {
+          source_outline_color: block.appearance.sourceOutlineColor || null,
+          outline_width_px: block.appearance.outlineWidthPx || null,
+        } : null,
+      }))
 
-            const bg = block.manualBgColor || block.backgroundColor
-            const x = block.xmin
-            const y = block.ymin
-            const width = block.xmax - block.xmin
-            const height = block.ymax - block.ymin
-            const radius = 5
+      console.log('[EXPORT] Calling Rust render_and_export_image...')
 
-            ctx.fillStyle = `rgb(${bg.r}, ${bg.g}, ${bg.b})`
-            ctx.beginPath()
-            
-            // Draw rounded rect manually (roundRect not universally supported)
-            ctx.moveTo(x + radius, y)
-            ctx.lineTo(x + width - radius, y)
-            ctx.quadraticCurveTo(x + width, y, x + width, y + radius)
-            ctx.lineTo(x + width, y + height - radius)
-            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height)
-            ctx.lineTo(x + radius, y + height)
-            ctx.quadraticCurveTo(x, y + height, x, y + height - radius)
-            ctx.lineTo(x, y + radius)
-            ctx.quadraticCurveTo(x, y, x + radius, y)
-            ctx.closePath()
-            
-            ctx.fill()
-          }
-        } else {
-          console.log('[PIPELINE] Skipping rectangles for LaMa/NewLaMa mode (using textless plate)')
-        }
+      // Step 4: Call Rust backend
+      const pngBuffer: number[] = await invoke('render_and_export_image', {
+        request: {
+          baseImageBuffer,
+          textBlocks: textBlocksForRust,
+          renderMethod,
+          defaultFont,
+        },
+      })
 
-        // Save 'withRectangles' stage (base + backgrounds, no text yet)
-        const rectanglesBlob = await canvasToBlob(canvas, { type: 'image/png' })
-        const rectanglesBuffer = await rectanglesBlob.arrayBuffer()
-        const rectanglesStage = await createImageFromBuffer(rectanglesBuffer)
-        setPipelineStage('withRectangles', rectanglesStage)
+      console.log('[EXPORT] Rust rendering complete, buffer size:', pngBuffer.length)
 
-        // 3. Draw translated text with Canvas 2D API (simple and reliable)
-        console.log(`[EXPORT] Drawing text for ${textBlocks.length} blocks using Canvas 2D`)
-        console.log(`[EXPORT] Text blocks:`, textBlocks.map(b => ({ 
-          text: b.translatedText?.substring(0, 20), 
-          fontSize: b.fontSize, 
-          hasColor: !!b.textColor 
-        })))
-        
-        for (const block of textBlocks) {
-          if (!block.translatedText || !block.fontSize || !block.textColor) {
-            console.log('[EXPORT] Skipping block:', { hasText: !!block.translatedText, hasFontSize: !!block.fontSize, hasColor: !!block.textColor })
-            continue
-          }
+      // Step 5: Convert buffer to Blob and save
+      const exportBlob = new Blob([new Uint8Array(pngBuffer)], { type: 'image/png' })
 
-          const textColor = block.manualTextColor || block.textColor
-          const fontFamily = block.fontFamily || defaultFont
-          const fontWeight = block.fontWeight || 'normal'
-          const fontStretch = block.fontStretch || 'normal'
-          const letterSpacing = block.letterSpacing || 0
-          const lineHeightMultiplier = block.lineHeight || 1.2
+      await fileSave(exportBlob, {
+        fileName: `translated-manga-${Date.now()}.png`,
+        extensions: ['.png'],
+        description: 'PNG Image',
+      })
 
-          console.log(`[EXPORT] Drawing block:`, block.translatedText.substring(0, 30), 'font:', fontFamily, 'size:', block.fontSize)
-          ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
-          ctx.textAlign = 'center'
-          ctx.textBaseline = 'middle'
-
-          // Configure outline if available from appearance analysis
-          const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
-          if (hasOutline) {
-            ctx.strokeStyle = `rgb(${block.appearance.sourceOutlineColor.r}, ${block.appearance.sourceOutlineColor.g}, ${block.appearance.sourceOutlineColor.b})`
-            ctx.lineWidth = block.appearance.outlineWidthPx
-            ctx.lineJoin = 'round'
-            ctx.miterLimit = 2
-          }
-
-          ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
-
-          const boxWidth = block.xmax - block.xmin
-          const boxHeight = block.ymax - block.ymin
-          const maxWidth = boxWidth * 0.9 // 10% padding
-          const centerX = (block.xmin + block.xmax) / 2
-          const centerY = (block.ymin + block.ymax) / 2
-
-          // Helper function to measure text width with manual letter spacing
-          const measureTextWithSpacing = (text: string): number => {
-            if (letterSpacing === 0) {
-              return ctx.measureText(text).width
-            }
-            let totalWidth = 0
-            for (let i = 0; i < text.length; i++) {
-              totalWidth += ctx.measureText(text[i]).width
-              if (i < text.length - 1) totalWidth += letterSpacing
-            }
-            return totalWidth
-          }
-
-          // Helper function to draw text with manual letter spacing
-          const drawTextWithSpacing = (text: string, x: number, y: number, isStroke: boolean = false) => {
-            if (letterSpacing === 0) {
-              // Simple case: no letter spacing, use normal text rendering
-              if (isStroke) {
-                ctx.strokeText(text, x, y, maxWidth)
-              } else {
-                ctx.fillText(text, x, y, maxWidth)
-              }
-              return
-            }
-            
-            // Complex case: manual letter spacing
-            const totalWidth = measureTextWithSpacing(text)
-            let currentX = x - totalWidth / 2
-            
-            for (let i = 0; i < text.length; i++) {
-              const char = text[i]
-              const charWidth = ctx.measureText(char).width
-              const charCenterX = currentX + charWidth / 2
-              
-              if (isStroke) {
-                ctx.strokeText(char, charCenterX, y)
-              } else {
-                ctx.fillText(char, charCenterX, y)
-              }
-              
-              currentX += charWidth + letterSpacing
-            }
-          }
-
-          // Wrap text to fit within box width
-          const words = block.translatedText.split(' ')
-          const lines: string[] = []
-          let currentLine = ''
-
-          for (const word of words) {
-            const testLine = currentLine + (currentLine ? ' ' : '') + word
-            const testWidth = measureTextWithSpacing(testLine)
-
-            if (testWidth > maxWidth && currentLine !== '') {
-              lines.push(currentLine)
-              currentLine = word
-            } else {
-              currentLine = testLine
-            }
-          }
-          if (currentLine) lines.push(currentLine)
-
-          const lineHeight = block.fontSize * lineHeightMultiplier
-          const totalHeight = lines.length * lineHeight
-
-          // Start from top if text is too tall, otherwise center vertically
-          const startY = totalHeight > boxHeight * 0.9
-            ? block.ymin + lineHeight / 2
-            : centerY - ((lines.length - 1) * lineHeight) / 2
-
-          lines.forEach((line, i) => {
-            const y = startY + i * lineHeight
-
-            // Draw outline first (if present)
-            if (hasOutline) {
-              drawTextWithSpacing(line, centerX, y, true) // true = stroke
-            }
-
-            // Then draw fill on top
-            drawTextWithSpacing(line, centerX, y, false) // false = fill
-          })
-        }
-
-        // 4. Save final stage and export as PNG
-        console.log('[EXPORT] Converting canvas to blob...')
-        const finalBlob = await canvasToBlob(canvas, { type: 'image/png', quality: 1.0 })
-        console.log('[EXPORT] Blob created, size:', finalBlob.size, 'bytes')
-        const finalBuffer = await finalBlob.arrayBuffer()
-        const finalStage = await createImageFromBuffer(finalBuffer)
-        setPipelineStage('final', finalStage)
-        setCurrentStage('final')
-
-        // 5. Save file using browser-fs-access (works in browser and Tauri)
-        console.log('[EXPORT] Opening save dialog...')
-        await fileSave(finalBlob, {
-          fileName: `translated-manga-${Date.now()}.png`,
-          extensions: ['.png'],
-          description: 'PNG Image',
-        })
-
-        console.log('Image exported successfully!')
-      } catch (err) {
-        console.error('Export error:', err)
-        setError(err instanceof Error ? err.message : 'Failed to export image')
-      } finally {
-        setExporting(false)
-      }
+      console.log('[EXPORT] Image exported successfully!')
     } catch (err) {
-      console.error('Export error:', err)
+      console.error('[EXPORT] Error:', err)
       setError(err instanceof Error ? err.message : 'Failed to export image')
+    } finally {
+      setExporting(false)
     }
   }
 
