@@ -20,37 +20,86 @@ pub struct FontStack {
 
 impl FontStack {
     /// Create a new font stack from a font-family string (CSS-like)
+    /// Includes comprehensive Unicode fallback fonts
     pub fn from_font_family(font_family: &str) -> anyhow::Result<Self> {
         let mut fonts = Vec::new();
         let mut names = Vec::new();
-        
+
         // Parse font-family string (basic comma-separated parsing)
         let font_names: Vec<&str> = font_family.split(',')
             .map(|s| s.trim().trim_matches('"').trim_matches('\''))
             .collect();
-        
-        for name in font_names {
+
+        // Step 1: Load user-specified fonts first
+        for name in &font_names {
             match load_font_by_family(name) {
                 Ok(font) => {
                     fonts.push(font);
                     names.push(name.to_string());
                 }
                 Err(e) => {
-                    tracing::warn!("[FONT] Failed to load font '{}': {}", name, e);
+                    tracing::warn!("[FONT] Failed to load user font '{}': {}", name, e);
                     // Continue with other fonts instead of failing
                 }
             }
         }
-        
-        // Ensure we have at least one font (fallback to Noto Sans)
-        if fonts.is_empty() {
-            let font_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
-            let font = FontArc::try_from_vec(font_data.to_vec())
-                .map_err(|e| anyhow::anyhow!("Failed to load emergency fallback font: {}", e))?;
-            fonts.push(font);
-            names.push("Noto Sans (emergency)".to_string());
+
+        // Step 2: Add comprehensive Unicode symbol fonts
+        // These are loaded in priority order for best Unicode coverage
+        let symbol_fonts = [
+            "Segoe UI Symbol",           // Windows symbol font
+            "Segoe UI Emoji",            // Windows emoji font
+            "Apple Symbols",             // macOS symbol font
+            "Apple Color Emoji",         // macOS emoji font
+            "Noto Sans Symbols",         // Google symbol font
+            "Noto Sans Symbols 2",       // Google symbol font 2
+            "Noto Emoji",                // Google emoji font
+            "Noto Color Emoji",          // Google color emoji
+            "GoNotoCJKCore",             // Comprehensive Unicode coverage
+            "Symbola",                   // Unicode symbol font
+            "DejaVu Sans",               // Comprehensive Unicode coverage
+            "FreeSerif",                 // Serif with good Unicode
+            "FreeSans",                  // Sans with good Unicode
+        ];
+
+        for symbol_font in &symbol_fonts {
+            match load_font_by_family(symbol_font) {
+                Ok(font) => {
+                    fonts.push(font);
+                    names.push(symbol_font.to_string());
+                    tracing::debug!("[FONT] Loaded symbol font: {}", symbol_font);
+                }
+                Err(_) => {
+                    // Symbol fonts are optional, don't log warnings for missing ones
+                    tracing::trace!("[FONT] Symbol font not available: {}", symbol_font);
+                }
+            }
         }
-        
+
+        // Step 3: Ensure we have at least one font (fallback to embedded fonts)
+        if fonts.is_empty() {
+            // Try GoNotoCJKCore first (comprehensive Unicode coverage)
+            let go_noto_data = include_bytes!("../assets/fonts/GoNotoCJKCore.ttf");
+            match FontArc::try_from_vec(go_noto_data.to_vec()) {
+                Ok(font) => {
+                    fonts.push(font);
+                    names.push("GoNotoCJKCore (embedded)".to_string());
+                    tracing::info!("[FONT] Loaded embedded GoNotoCJKCore font");
+                }
+                Err(e) => {
+                    tracing::warn!("[FONT] Failed to load embedded GoNotoCJKCore: {}", e);
+
+                    // If GoNotoCJKCore failed, try NotoSans-Regular
+                    let noto_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+                    let font = FontArc::try_from_vec(noto_data.to_vec())
+                        .map_err(|e| anyhow::anyhow!("Failed to load emergency fallback font: {}", e))?;
+                    fonts.push(font);
+                    names.push("Noto Sans (emergency)".to_string());
+                }
+            }
+        }
+
+        tracing::info!("[FONT] FontStack created with {} fonts: {:?}", fonts.len(), names);
         Ok(FontStack { fonts, names })
     }
     
@@ -60,15 +109,20 @@ impl FontStack {
     }
     
     /// Find the best font for a character (with fallback)
+    /// Returns the font and its index in the stack
     pub fn font_for_char(&self, c: char) -> (&FontArc, usize) {
         for (i, font) in self.fonts.iter().enumerate() {
             let glyph_id = font.glyph_id(c);
             // Check if we can get an outline for this glyph (indicates it exists)
             if font.outline(glyph_id).is_some() {
+                tracing::trace!("[FONT] Found char '{}' (U+{:04X}) in font {}: {}",
+                    c, c as u32, i, self.names.get(i).unwrap_or(&"unknown".to_string()));
                 return (font, i);
             }
         }
         // Fallback to primary font if no font has the character
+        tracing::trace!("[FONT] Char '{}' (U+{:04X}) not found in any font, using primary: {}",
+            c, c as u32, self.names.get(0).unwrap_or(&"unknown".to_string()));
         (&self.fonts[0], 0)
     }
     
@@ -211,6 +265,10 @@ pub fn render_text_on_image(
     } else {
         "NO_TEXT_BLOCKS"
     };
+
+    // DEBUG: Unicode font fallback testing
+    // Draw Unicode characters in three different ways to test font fallback
+    draw_unicode_debug_test(&mut img, width, height, default_font)?;
 
     // DEBUG: Corner diagnostic markers for text export verification
     // These draw colored text in image corners showing export data flow
@@ -655,6 +713,119 @@ fn draw_text_with_spacing_and_outline(
         
         current_x += char_width + letter_spacing;
     }
+}
+
+/// Debug function to test Unicode font fallback with various symbols
+fn draw_unicode_debug_test(
+    img: &mut RgbaImage,
+    img_width: u32,
+    img_height: u32,
+    default_font: &str,
+) -> anyhow::Result<()> {
+    let scale = PxScale::from(20.0);
+
+    // Unicode characters to test: heart, spade, and various symbols (safe slice)
+    let unicode_chars = "♥♠♣♦★☆♪♫⚡☀☁❄⚽🏀🎾⚾🏈🏉🎱🎯🎪🎭🎨🎬";
+
+    // 1. TOP LEFT: Red text using Arial font (system font)
+    let red_color = Rgba([255, 0, 0, 255]);
+    match load_font_by_family("Arial") {
+        Ok(arial_font) => {
+            draw_text_mut(img, red_color, 20, 20, scale, &arial_font, &format!("Arial: {}", unicode_chars));
+        }
+        Err(_) => {
+            // Fallback to embedded font if Arial fails
+            let font_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+            let fallback_font = FontArc::try_from_vec(font_data.to_vec())
+                .map_err(|e| anyhow::anyhow!("Failed to load embedded fallback font: {}", e))?;
+            draw_text_mut(img, red_color, 20, 20, scale, &fallback_font, &format!("Fallback: {}", unicode_chars));
+        }
+    }
+
+    // 2. TOP RIGHT: Blue text using user's default font
+    let blue_color = Rgba([0, 0, 255, 255]);
+    match load_font_by_family(default_font) {
+        Ok(user_font) => {
+            let test_text = format!("User: {}", unicode_chars);
+            let text_width = measure_text_width(&test_text, &user_font, scale);
+            draw_text_mut(img, blue_color, (img_width as i32) - (text_width as i32) - 20, 20, scale, &user_font, &test_text);
+        }
+        Err(_) => {
+            // Fallback message if user font fails
+            let font_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+            let fallback_font = FontArc::try_from_vec(font_data.to_vec())
+                .map_err(|e| anyhow::anyhow!("Failed to load embedded fallback font: {}", e))?;
+            let fallback_text = "User Font Failed";
+            let text_width = measure_text_width(fallback_text, &fallback_font, scale);
+            draw_text_mut(img, blue_color, (img_width as i32) - (text_width as i32) - 20, 20, scale, &fallback_font, fallback_text);
+        }
+    }
+
+    // 3. BOTTOM LEFT: Yellow text using FontStack fallback logic
+    let yellow_color = Rgba([255, 255, 0, 255]);
+    match FontStack::from_font_family(default_font) {
+        Ok(font_stack) => {
+            // Show how many fonts were loaded
+            let font_count = font_stack.fonts.len();
+            let test_text = format!("Stack ({} fonts): {}", font_count, unicode_chars);
+            let mut current_x = 20.0;
+
+            for c in test_text.chars() {
+                let char_str = c.to_string();
+                let (font, font_idx) = font_stack.font_for_char(c);
+                let char_width = measure_text_width(&char_str, font, scale);
+
+                draw_text_mut(
+                    img,
+                    yellow_color,
+                    current_x as i32,
+                    (img_height as i32) - 50,
+                    scale,
+                    font,
+                    &char_str,
+                );
+
+                current_x += char_width;
+            }
+        }
+        Err(e) => {
+            // Try GoNotoCJKCore as emergency fallback
+            let go_noto_data = include_bytes!("../assets/fonts/GoNotoCJKCore.ttf");
+            match FontArc::try_from_vec(go_noto_data.to_vec()) {
+                Ok(emergency_font) => {
+                    let font_count = 1;
+                    let test_text = format!("GoNoto ({}): {}", font_count, unicode_chars);
+                    let mut current_x = 20.0;
+
+                    for c in test_text.chars() {
+                        let char_str = c.to_string();
+                        let char_width = measure_text_width(&char_str, &emergency_font, scale);
+
+                        draw_text_mut(
+                            img,
+                            yellow_color,
+                            current_x as i32,
+                            (img_height as i32) - 50,
+                            scale,
+                            &emergency_font,
+                            &char_str,
+                        );
+
+                        current_x += char_width;
+                    }
+                }
+                Err(_) => {
+                    // Final fallback to NotoSans
+                    let noto_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+                    let fallback_font = FontArc::try_from_vec(noto_data.to_vec()).unwrap();
+                    let error_msg = format!("Stack Error: {}", e.to_string().chars().take(15).collect::<String>());
+                    draw_text_mut(img, yellow_color, 20, (img_height as i32) - 50, scale, &fallback_font, &error_msg);
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 // Debug methods for testing different rendering approaches with real data
