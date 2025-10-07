@@ -82,7 +82,7 @@ function estimateInitialFontSize(
   const boxArea = boxWidth * boxHeight
 
   // If mask stats available, use actual text area
-  const maskArea = block.maskStats?.area || boxArea * 0.5
+  const maskArea = block.maskStats?.area || boxArea * 0.7  // Increased from 0.5 for better fallback
 
   // Estimate glyphs per line based on layout mode
   const avgGlyphsPerLine = strategy.mode === 'vertical-narrow' ? 5 : 10
@@ -92,7 +92,7 @@ function estimateInitialFontSize(
   const targetArea = boxArea * strategy.targetCoverageRatio
 
   // Solve: fontSize^2 * text.length * density = targetArea
-  const glyphDensity = 0.7 // Empirical constant (glyph area as fraction of em-square)
+  const glyphDensity = 0.85 // Increased from 0.7 for better CJK text density estimation
   const fontSize = Math.sqrt(targetArea / (text.length * glyphDensity))
 
   // Clamp to reasonable range
@@ -275,19 +275,19 @@ function calculatePenalty(
 ): number {
   let penalty = 0
 
-  // Hard constraint: overflow
+  // Hard constraint: overflow (reduced penalty to allow larger text)
   if (width > maxWidth) {
-    penalty += (width - maxWidth) * 100
+    penalty += (width - maxWidth) * 50  // Reduced from 100
   }
 
   if (height > maxHeight) {
-    penalty += (height - maxHeight) * 100
+    penalty += (height - maxHeight) * 50  // Reduced from 100
   }
 
-  // Soft constraint: deviation from target coverage
+  // Soft constraint: deviation from target coverage (increased weight)
   const actualCoverage = (width * height) / (maxWidth * maxHeight)
   const coverageDeviation = Math.abs(actualCoverage - targetCoverage)
-  penalty += coverageDeviation * 50
+  penalty += coverageDeviation * 75  // Increased from 50 to prefer larger text
 
   // Soft constraint: raggedness (variance in line lengths)
   if (lines.length > 1) {

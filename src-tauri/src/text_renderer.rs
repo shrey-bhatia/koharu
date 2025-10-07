@@ -11,6 +11,127 @@ use font_kit::source::SystemSource;
 use font_kit::family_name::FamilyName;
 use font_kit::properties::Properties;
 
+// Font stack for Unicode fallback support
+#[derive(Clone)]
+pub struct FontStack {
+    fonts: Vec<FontArc>,
+    names: Vec<String>,
+}
+
+impl FontStack {
+    /// Create a new font stack from a font-family string (CSS-like)
+    /// Includes comprehensive Unicode fallback fonts
+    pub fn from_font_family(font_family: &str) -> anyhow::Result<Self> {
+        let mut fonts = Vec::new();
+        let mut names = Vec::new();
+
+        // Parse font-family string (basic comma-separated parsing)
+        let font_names: Vec<&str> = font_family.split(',')
+            .map(|s| s.trim().trim_matches('"').trim_matches('\''))
+            .collect();
+
+        // Step 1: Load user-specified fonts first
+        for name in &font_names {
+            match load_font_by_family(name) {
+                Ok(font) => {
+                    fonts.push(font);
+                    names.push(name.to_string());
+                }
+                Err(e) => {
+                    tracing::warn!("[FONT] Failed to load user font '{}': {}", name, e);
+                    // Continue with other fonts instead of failing
+                }
+            }
+        }
+
+        // Step 2: Add comprehensive Unicode symbol fonts
+        // These are loaded in priority order for best Unicode coverage
+        let symbol_fonts = [
+            "Segoe UI Symbol",           // Windows symbol font
+            "Segoe UI Emoji",            // Windows emoji font
+            "Apple Symbols",             // macOS symbol font
+            "Apple Color Emoji",         // macOS emoji font
+            "Noto Sans Symbols",         // Google symbol font
+            "Noto Sans Symbols 2",       // Google symbol font 2
+            "Noto Emoji",                // Google emoji font
+            "Noto Color Emoji",          // Google color emoji
+            "GoNotoCJKCore",             // Comprehensive Unicode coverage
+            "Symbola",                   // Unicode symbol font
+            "DejaVu Sans",               // Comprehensive Unicode coverage
+            "FreeSerif",                 // Serif with good Unicode
+            "FreeSans",                  // Sans with good Unicode
+        ];
+
+        for symbol_font in &symbol_fonts {
+            match load_font_by_family(symbol_font) {
+                Ok(font) => {
+                    fonts.push(font);
+                    names.push(symbol_font.to_string());
+                    tracing::debug!("[FONT] Loaded symbol font: {}", symbol_font);
+                }
+                Err(_) => {
+                    // Symbol fonts are optional, don't log warnings for missing ones
+                    tracing::trace!("[FONT] Symbol font not available: {}", symbol_font);
+                }
+            }
+        }
+
+        // Step 3: Ensure we have at least one font (fallback to embedded fonts)
+        if fonts.is_empty() {
+            // Try GoNotoCJKCore first (comprehensive Unicode coverage)
+            let go_noto_data = include_bytes!("../assets/fonts/GoNotoCJKCore.ttf");
+            match FontArc::try_from_vec(go_noto_data.to_vec()) {
+                Ok(font) => {
+                    fonts.push(font);
+                    names.push("GoNotoCJKCore (embedded)".to_string());
+                    tracing::info!("[FONT] Loaded embedded GoNotoCJKCore font");
+                }
+                Err(e) => {
+                    tracing::warn!("[FONT] Failed to load embedded GoNotoCJKCore: {}", e);
+
+                    // If GoNotoCJKCore failed, try NotoSans-Regular
+                    let noto_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+                    let font = FontArc::try_from_vec(noto_data.to_vec())
+                        .map_err(|e| anyhow::anyhow!("Failed to load emergency fallback font: {}", e))?;
+                    fonts.push(font);
+                    names.push("Noto Sans (emergency)".to_string());
+                }
+            }
+        }
+
+        tracing::info!("[FONT] FontStack created with {} fonts: {:?}", fonts.len(), names);
+        Ok(FontStack { fonts, names })
+    }
+    
+    /// Get the primary font
+    pub fn primary(&self) -> &FontArc {
+        &self.fonts[0]
+    }
+    
+    /// Find the best font for a character (with fallback)
+    /// Returns the font and its index in the stack
+    pub fn font_for_char(&self, c: char) -> (&FontArc, usize) {
+        for (i, font) in self.fonts.iter().enumerate() {
+            let glyph_id = font.glyph_id(c);
+            // Check if we can get an outline for this glyph (indicates it exists)
+            if font.outline(glyph_id).is_some() {
+                tracing::trace!("[FONT] Found char '{}' (U+{:04X}) in font {}: {}",
+                    c, c as u32, i, self.names.get(i).unwrap_or(&"unknown".to_string()));
+                return (font, i);
+            }
+        }
+        // Fallback to primary font if no font has the character
+        tracing::trace!("[FONT] Char '{}' (U+{:04X}) not found in any font, using primary: {}",
+            c, c as u32, self.names.get(0).unwrap_or(&"unknown".to_string()));
+        (&self.fonts[0], 0)
+    }
+    
+    /// Get all fonts (for glyph_brush_layout)
+    pub fn all_fonts(&self) -> &[FontArc] {
+        &self.fonts
+    }
+}
+
 // RGB color type matching frontend
 #[derive(Debug, Deserialize, Clone)]
 pub struct RgbColor {
@@ -145,6 +266,10 @@ pub fn render_text_on_image(
         "NO_TEXT_BLOCKS"
     };
 
+    // DEBUG: Unicode font fallback testing
+    // Draw Unicode characters in three different ways to test font fallback
+    draw_unicode_debug_test(&mut img, width, height, default_font)?;
+
     // DEBUG: Corner diagnostic markers for text export verification
     // These draw colored text in image corners showing export data flow
     // Uncomment to enable debug diagnostics in exported images
@@ -189,8 +314,8 @@ pub fn render_text_on_image(
         let letter_spacing = block.letter_spacing.unwrap_or(0.0);
         let line_height_multiplier = block.line_height.unwrap_or(1.2);
 
-        // Load the appropriate font for this text block
-        let font = load_font_by_family(font_family)?;
+        // Load the appropriate font stack for this text block
+        let font_stack = FontStack::from_font_family(font_family)?;
 
         tracing::debug!("[RUST_EXPORT] Drawing block {}: '{}' font={} size={}",
             i, &translated_text[..translated_text.len().min(30)], font_family, font_size);
@@ -203,7 +328,7 @@ pub fn render_text_on_image(
         draw_text_block(
             &mut img,
             block,
-            &font,
+            &font_stack,
             translated_text,
             font_size,
             text_color,
@@ -243,7 +368,7 @@ fn draw_rounded_rectangle(
 fn draw_text_block(
     img: &mut RgbaImage,
     block: &TextBlock,
-    font: &FontArc,
+    font_stack: &FontStack,
     text: &str,
     font_size: f32,
     text_color: &RgbColor,
@@ -272,11 +397,7 @@ fn draw_text_block(
             format!("{} {}", current_line, word)
         };
         
-        let test_width = if letter_spacing == 0.0 {
-            measure_text_width(&test_line, font, scale)
-        } else {
-            measure_text_width_with_spacing(&test_line, font, scale, letter_spacing)
-        };
+        let test_width = measure_text_width_mixed_fonts(&test_line, font_stack, scale, letter_spacing);
         
         if test_width > max_width && !current_line.is_empty() {
             lines.push(current_line.clone());
@@ -317,15 +438,13 @@ fn draw_text_block(
                     ]);
                     
                     if letter_spacing == 0.0 {
-                        // Simple stroke - draw with offset
-                        let text_width = measure_text_width(line, font, scale);
-                        let left_x = center_x - text_width / 2.0;
-                        draw_text_with_outline(
+                        // Simple stroke - need character-by-character for mixed fonts
+                        draw_text_with_mixed_fonts_and_outline(
                             img,
-                            left_x as i32,
-                            y as i32,
+                            center_x,
+                            y,
                             scale,
-                            font,
+                            font_stack,
                             line,
                             outline_rgba,
                             outline_width as i32,
@@ -337,7 +456,7 @@ fn draw_text_block(
                             center_x,
                             y,
                             scale,
-                            font,
+                            font_stack,
                             line,
                             outline_rgba,
                             outline_width as i32,
@@ -349,32 +468,17 @@ fn draw_text_block(
         }
         
         // Draw fill on top (matches JS: fill after stroke)
-        if letter_spacing == 0.0 {
-            // Simple rendering (matches JS: ctx.fillText(text, x, y, maxWidth))
-            let text_width = measure_text_width(line, font, scale);
-            let left_x = center_x - text_width / 2.0;
-            draw_text_mut(
-                img,
-                text_rgba,
-                left_x as i32,
-                y as i32,
-                scale,
-                font,
-                line,
-            );
-        } else {
-            // Manual letter spacing (matches JS character-by-character logic)
-            draw_text_with_spacing(
-                img,
-                center_x,
-                y,
-                scale,
-                font,
-                line,
-                text_rgba,
-                letter_spacing,
-            );
-        }
+        // Always use character-by-character rendering for proper Unicode font fallback
+        draw_text_with_mixed_fonts(
+            img,
+            center_x,
+            y,
+            scale,
+            font_stack,
+            line,
+            text_rgba,
+            letter_spacing,
+        );
     }
     
     Ok(())
@@ -434,16 +538,17 @@ fn draw_text_with_spacing(
     center_x: f32,
     y: f32,
     scale: PxScale,
-    font: &FontArc,
+    font_stack: &FontStack,
     text: &str,
     color: Rgba<u8>,
     letter_spacing: f32,
 ) {
-    let total_width = measure_text_width_with_spacing(text, font, scale, letter_spacing);
+    let total_width = measure_text_width_mixed_fonts(text, font_stack, scale, letter_spacing);
     let mut current_x = center_x - total_width / 2.0;
     
     for c in text.chars() {
         let char_str = c.to_string();
+        let (font, _) = font_stack.font_for_char(c);
         let char_width = measure_text_width(&char_str, font, scale);
         
         draw_text_mut(
@@ -491,23 +596,108 @@ fn draw_text_with_outline(
     }
 }
 
+/// Measure text width with mixed fonts and optional letter spacing
+fn measure_text_width_mixed_fonts(text: &str, font_stack: &FontStack, scale: PxScale, spacing: f32) -> f32 {
+    let mut total_width = 0.0;
+    let chars: Vec<char> = text.chars().collect();
+    
+    for (i, c) in chars.iter().enumerate() {
+        let char_str = c.to_string();
+        let (font, _) = font_stack.font_for_char(*c);
+        total_width += measure_text_width(&char_str, font, scale);
+        if i < chars.len() - 1 {
+            total_width += spacing;
+        }
+    }
+    
+    total_width
+}
+
+/// Draw text with mixed fonts (handles Unicode characters properly)
+fn draw_text_with_mixed_fonts(
+    img: &mut RgbaImage,
+    center_x: f32,
+    y: f32,
+    scale: PxScale,
+    font_stack: &FontStack,
+    text: &str,
+    color: Rgba<u8>,
+    letter_spacing: f32,
+) {
+    let total_width = measure_text_width_mixed_fonts(text, font_stack, scale, letter_spacing);
+    let mut current_x = center_x - total_width / 2.0;
+    
+    for c in text.chars() {
+        let char_str = c.to_string();
+        let (font, _) = font_stack.font_for_char(c);
+        let char_width = measure_text_width(&char_str, font, scale);
+        
+        draw_text_mut(
+            img,
+            color,
+            current_x as i32,
+            y as i32,
+            scale,
+            font,
+            &char_str,
+        );
+        
+        current_x += char_width + letter_spacing;
+    }
+}
+
+/// Draw text with mixed fonts AND outline
+fn draw_text_with_mixed_fonts_and_outline(
+    img: &mut RgbaImage,
+    center_x: f32,
+    y: f32,
+    scale: PxScale,
+    font_stack: &FontStack,
+    text: &str,
+    outline_color: Rgba<u8>,
+    outline_width: i32,
+) {
+    let total_width = measure_text_width_mixed_fonts(text, font_stack, scale, 0.0);
+    let mut current_x = center_x - total_width / 2.0;
+    
+    for c in text.chars() {
+        let char_str = c.to_string();
+        let (font, _) = font_stack.font_for_char(c);
+        let char_width = measure_text_width(&char_str, font, scale);
+        
+        draw_text_with_outline(
+            img,
+            current_x as i32,
+            y as i32,
+            scale,
+            font,
+            &char_str,
+            outline_color,
+            outline_width,
+        );
+        
+        current_x += char_width;
+    }
+}
+
 /// Draw text with spacing AND outline
 fn draw_text_with_spacing_and_outline(
     img: &mut RgbaImage,
     center_x: f32,
     y: f32,
     scale: PxScale,
-    font: &FontArc,
+    font_stack: &FontStack,
     text: &str,
     outline_color: Rgba<u8>,
     outline_width: i32,
     letter_spacing: f32,
 ) {
-    let total_width = measure_text_width_with_spacing(text, font, scale, letter_spacing);
+    let total_width = measure_text_width_mixed_fonts(text, font_stack, scale, letter_spacing);
     let mut current_x = center_x - total_width / 2.0;
     
     for c in text.chars() {
         let char_str = c.to_string();
+        let (font, _) = font_stack.font_for_char(c);
         let char_width = measure_text_width(&char_str, font, scale);
         
         draw_text_with_outline(
@@ -525,11 +715,124 @@ fn draw_text_with_spacing_and_outline(
     }
 }
 
+/// Debug function to test Unicode font fallback with various symbols
+fn draw_unicode_debug_test(
+    img: &mut RgbaImage,
+    img_width: u32,
+    img_height: u32,
+    default_font: &str,
+) -> anyhow::Result<()> {
+    let scale = PxScale::from(20.0);
+
+    // Unicode characters to test: heart, spade, and various symbols (safe slice)
+    let unicode_chars = "♥♠♣♦★☆♪♫⚡☀☁❄⚽🏀🎾⚾🏈🏉🎱🎯🎪🎭🎨🎬";
+
+    // 1. TOP LEFT: Red text using Arial font (system font)
+    let red_color = Rgba([255, 0, 0, 255]);
+    match load_font_by_family("Arial") {
+        Ok(arial_font) => {
+            draw_text_mut(img, red_color, 20, 20, scale, &arial_font, &format!("Arial: {}", unicode_chars));
+        }
+        Err(_) => {
+            // Fallback to embedded font if Arial fails
+            let font_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+            let fallback_font = FontArc::try_from_vec(font_data.to_vec())
+                .map_err(|e| anyhow::anyhow!("Failed to load embedded fallback font: {}", e))?;
+            draw_text_mut(img, red_color, 20, 20, scale, &fallback_font, &format!("Fallback: {}", unicode_chars));
+        }
+    }
+
+    // 2. TOP RIGHT: Blue text using user's default font
+    let blue_color = Rgba([0, 0, 255, 255]);
+    match load_font_by_family(default_font) {
+        Ok(user_font) => {
+            let test_text = format!("User: {}", unicode_chars);
+            let text_width = measure_text_width(&test_text, &user_font, scale);
+            draw_text_mut(img, blue_color, (img_width as i32) - (text_width as i32) - 20, 20, scale, &user_font, &test_text);
+        }
+        Err(_) => {
+            // Fallback message if user font fails
+            let font_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+            let fallback_font = FontArc::try_from_vec(font_data.to_vec())
+                .map_err(|e| anyhow::anyhow!("Failed to load embedded fallback font: {}", e))?;
+            let fallback_text = "User Font Failed";
+            let text_width = measure_text_width(fallback_text, &fallback_font, scale);
+            draw_text_mut(img, blue_color, (img_width as i32) - (text_width as i32) - 20, 20, scale, &fallback_font, fallback_text);
+        }
+    }
+
+    // 3. BOTTOM LEFT: Yellow text using FontStack fallback logic
+    let yellow_color = Rgba([255, 255, 0, 255]);
+    match FontStack::from_font_family(default_font) {
+        Ok(font_stack) => {
+            // Show how many fonts were loaded
+            let font_count = font_stack.fonts.len();
+            let test_text = format!("Stack ({} fonts): {}", font_count, unicode_chars);
+            let mut current_x = 20.0;
+
+            for c in test_text.chars() {
+                let char_str = c.to_string();
+                let (font, font_idx) = font_stack.font_for_char(c);
+                let char_width = measure_text_width(&char_str, font, scale);
+
+                draw_text_mut(
+                    img,
+                    yellow_color,
+                    current_x as i32,
+                    (img_height as i32) - 50,
+                    scale,
+                    font,
+                    &char_str,
+                );
+
+                current_x += char_width;
+            }
+        }
+        Err(e) => {
+            // Try GoNotoCJKCore as emergency fallback
+            let go_noto_data = include_bytes!("../assets/fonts/GoNotoCJKCore.ttf");
+            match FontArc::try_from_vec(go_noto_data.to_vec()) {
+                Ok(emergency_font) => {
+                    let font_count = 1;
+                    let test_text = format!("GoNoto ({}): {}", font_count, unicode_chars);
+                    let mut current_x = 20.0;
+
+                    for c in test_text.chars() {
+                        let char_str = c.to_string();
+                        let char_width = measure_text_width(&char_str, &emergency_font, scale);
+
+                        draw_text_mut(
+                            img,
+                            yellow_color,
+                            current_x as i32,
+                            (img_height as i32) - 50,
+                            scale,
+                            &emergency_font,
+                            &char_str,
+                        );
+
+                        current_x += char_width;
+                    }
+                }
+                Err(_) => {
+                    // Final fallback to NotoSans
+                    let noto_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+                    let fallback_font = FontArc::try_from_vec(noto_data.to_vec()).unwrap();
+                    let error_msg = format!("Stack Error: {}", e.to_string().chars().take(15).collect::<String>());
+                    draw_text_mut(img, yellow_color, 20, (img_height as i32) - 50, scale, &fallback_font, &error_msg);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 // Debug methods for testing different rendering approaches with real data
 // Method 1: Red text in top-left (DATA FLOW DIAGNOSIS)
 fn draw_debug_text_method1(
     img: &mut RgbaImage,
-    font: &FontArc,
+    font_stack: &FontStack,
     text: &str,
     img_width: u32,
     img_height: u32,
@@ -559,14 +862,14 @@ fn draw_debug_text_method1(
         "BLOCKS:0_NO_DATA".to_string()
     };
 
-    draw_text_mut(img, color, x, y, scale, font, &display_text);
+    draw_text_mut(img, color, x, y, scale, font_stack.primary(), &display_text);
     Ok(())
 }
 
 // Method 2: Black text in top-right (CONTENT ANALYSIS)
 fn draw_debug_text_method2(
     img: &mut RgbaImage,
-    font: &FontArc,
+    font_stack: &FontStack,
     text: &str,
     img_width: u32,
     img_height: u32,
@@ -588,18 +891,18 @@ fn draw_debug_text_method2(
         "NO_BLOCK_DATA".to_string()
     };
 
-    let text_width = measure_text_width(&display_text, font, scale);
+    let text_width = measure_text_width(&display_text, font_stack.primary(), scale);
     let x = (img_width as i32) - (text_width as i32) - 20;
     let y = 30;
 
-    draw_text_mut(img, color, x, y, scale, font, &display_text);
+    draw_text_mut(img, color, x, y, scale, font_stack.primary(), &display_text);
     Ok(())
 }
 
 // Method 3: Yellow text in bottom-left (SERIALIZATION CHECK)
 fn draw_debug_text_method3(
     img: &mut RgbaImage,
-    font: &FontArc,
+    font_stack: &FontStack,
     text: &str,
     img_width: u32,
     img_height: u32,
@@ -636,14 +939,14 @@ fn draw_debug_text_method3(
         }
     }
 
-    draw_text_mut(img, color, x, y, scale, font, &display_text);
+    draw_text_mut(img, color, x, y, scale, font_stack.primary(), &display_text);
     Ok(())
 }
 
 // Method 4: Blue text in bottom-right (FEATURE SUPPORT TEST)
 fn draw_debug_text_method4(
     img: &mut RgbaImage,
-    font: &FontArc,
+    font_stack: &FontStack,
     text: &str,
     img_width: u32,
     img_height: u32,
@@ -664,11 +967,11 @@ fn draw_debug_text_method4(
         "NO_BLOCK_DATA".to_string()
     };
 
-    let text_width = measure_text_width(&display_text, font, scale);
+    let text_width = measure_text_width(&display_text, font_stack.primary(), scale);
     let x = (img_width as i32) - (text_width as i32) - 20;
     let y = (img_height as i32) - 30;
 
-    draw_text_mut(img, color, x, y, scale, font, &display_text);
+    draw_text_mut(img, color, x, y, scale, font_stack.primary(), &display_text);
     Ok(())
 }
 
