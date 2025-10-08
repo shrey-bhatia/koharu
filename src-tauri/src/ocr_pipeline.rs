@@ -37,33 +37,17 @@ impl PaddleOcrPipeline {
     pub async fn new(model_dir: &Path, device: DeviceConfig) -> Result<Self> {
         let package = ModelPackage::from_dir(model_dir)?;
         
-        // Configure execution provider based on device selection
+        // Note: ORT execution provider is configured globally in lib.rs
+        // Sessions will inherit the global execution provider automatically
         let execution_provider = match device {
-            DeviceConfig::Cuda => {
-                // Check if CUDA is available (simplified check)
-                #[cfg(feature = "cuda")]
-                {
-                    "CUDA".to_string()
-                }
-                #[cfg(not(feature = "cuda"))]
-                {
-                    log::warn!("CUDA requested but not compiled in. Falling back to CPU.");
-                    "CPU".to_string()
-                }
-            }
-            DeviceConfig::Cpu => "CPU".to_string(),
+            DeviceConfig::Cuda => "CUDA (global)",
+            DeviceConfig::Cpu => "CPU (global)",
         };
 
-        // Create session builders with execution provider
-        let mut det_builder = Session::builder()?;
-        let mut rec_builder = Session::builder()?;
-        let mut cls_builder = Session::builder()?;
-
-        if execution_provider == "CUDA" {
-            det_builder = det_builder.with_execution_providers([ort::execution_providers::CUDAExecutionProvider::default().build()])?;
-            rec_builder = rec_builder.with_execution_providers([ort::execution_providers::CUDAExecutionProvider::default().build()])?;
-            cls_builder = cls_builder.with_execution_providers([ort::execution_providers::CUDAExecutionProvider::default().build()])?;
-        }
+        // Create session builders (inherit global execution provider)
+        let det_builder = Session::builder()?;
+        let rec_builder = Session::builder()?;
+        let cls_builder = Session::builder()?;
 
         // Load detection model
         let det_session = det_builder.commit_from_file(model_dir.join("det.onnx"))?;
@@ -91,7 +75,7 @@ impl PaddleOcrPipeline {
             cls_session: cls_session.map(|s| Arc::new(Mutex::new(s))),
             package,
             dictionary,
-            execution_provider,
+            execution_provider: execution_provider.to_string(),
         };
 
         // Log ONNX Runtime metadata

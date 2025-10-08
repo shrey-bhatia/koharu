@@ -36,13 +36,39 @@ pub async fn ocr(app: AppHandle, image: Vec<u8>) -> CommandResult<Vec<String>> {
     let active_key = state.active_ocr.read().await.clone();
     let pipelines = state.ocr_pipelines.read().await;
     
+    // Try PaddleOcrPipeline first
     if let Some(pipeline) = pipelines.get(&active_key) {
-        let img = image::load_from_memory(&image).context("Failed to load image")?;
-        let regions = pipeline.detect_text_regions(&img).await?;
-        let result = pipeline.recognize_text(&img, &regions).await?;
-        Ok(result)
+        match (|| async {
+            let img = image::load_from_memory(&image).context("Failed to load image")?;
+            let regions = pipeline.detect_text_regions(&img).await?;
+            let result = pipeline.recognize_text(&img, &regions).await?;
+            Ok::<Vec<String>, anyhow::Error>(result)
+        })().await {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                tracing::warn!("PaddleOcrPipeline failed: {}. Falling back to manga-ocr.", e);
+            }
+        }
+    }
+    
+    // Fallback to manga-ocr
+    if let Some(manga_ocr) = state.manga_ocr.lock().await.as_mut() {
+        match (|| {
+            let img = image::load_from_memory(&image).context("Failed to load image")?;
+            let text = manga_ocr.inference(&img)?;
+            Ok::<Vec<String>, anyhow::Error>(vec![text])
+        })() {
+            Ok(result) => {
+                tracing::info!("Successfully used manga-ocr fallback");
+                Ok(result)
+            },
+            Err(e) => {
+                Err(anyhow!("Both OCR engines failed. PaddleOcrPipeline: {}. Manga-ocr: {}", 
+                    pipelines.get(&active_key).map(|_| "failed").unwrap_or("not available"), e).into())
+            }
+        }
     } else {
-        Err(anyhow!("OCR engine not found: {}", active_key).into())
+        Err(anyhow!("No OCR engines available. PaddleOcrPipeline not found and manga-ocr not initialized.").into())
     }
 }
 

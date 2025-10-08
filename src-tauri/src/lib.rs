@@ -135,8 +135,15 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
     let model_dir = app.path().app_data_dir()?.join("models");
     std::fs::create_dir_all(&model_dir)?;
     
+    // Map GPU preference to DeviceConfig for OCR pipeline
+    let ocr_device_config = match gpu_pref.as_str() {
+        "cuda" => DeviceConfig::Cuda,
+        "directml" => DeviceConfig::Cuda, // DirectML uses CUDA provider in ORT
+        _ => DeviceConfig::Cpu,
+    };
+    
     // Initialize OCR pipelines (optional - app can run without models)
-    match PaddleOcrPipeline::new(&model_dir, DeviceConfig::Cpu).await {
+    match PaddleOcrPipeline::new(&model_dir, ocr_device_config).await {
         Ok(ocr_pipeline) => {
             ocr_pipelines.insert("default".to_string(), Arc::new(ocr_pipeline) as Arc<dyn OcrPipeline + Send + Sync>);
             tracing::info!("✓ OCR pipeline initialized successfully");
@@ -274,6 +281,7 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
     app.manage(AppState {
         comic_text_detector: Mutex::new(comic_text_detector),
         lama: Mutex::new(lama),
+        manga_ocr: Mutex::new(Some(manga_ocr)),
         gpu_init_result: Mutex::new(init_result),
         ocr_pipelines: RwLock::new(ocr_pipelines),
         active_ocr: RwLock::new("default".to_string()),
