@@ -1,0 +1,77 @@
+name: OCR Validation
+
+on:
+  push:
+    branches: [ main, rust-export ]
+  pull_request:
+    branches: [ main, rust-export ]
+
+jobs:
+  ocr-validation:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        lfs: true
+
+    - name: Restore LFS cache
+      uses: actions/cache@v3
+      id: lfs-cache
+      with:
+        path: .git/lfs
+        key: lfs-${{ runner.os }}-${{ hashFiles('.gitattributes') }}
+        restore-keys: |
+          lfs-${{ runner.os }}-
+
+    - name: Pull LFS files
+      run: git lfs pull
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache Cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache Cargo build
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: cargo-build-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+
+    - name: Run OCR validation tests
+      run: |
+        cd src-tauri
+        cargo test --release ocr_validation -- --nocapture
+      env:
+        # Force CPU execution provider for deterministic results
+        ORT_EXECUTION_PROVIDER: "CPU"
+
+    - name: Run accuracy benchmarks
+      run: |
+        cd src-tauri
+        cargo bench --bench ocr_benchmark -- --save-baseline main
+      env:
+        ORT_EXECUTION_PROVIDER: "CPU"
+
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v3
+      with:
+        name: benchmark-results
+        path: src-tauri/target/criterion/
+
+    - name: Check accuracy thresholds
+      run: |
+        cd src-tauri
+        # This would run a custom script to validate CER/WER thresholds
+        # For now, just check that tests pass
+        cargo test --release test_accuracy_thresholds

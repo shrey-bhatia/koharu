@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use tauri::{AppHandle, Manager};
 use font_kit::source::SystemSource;
 use image::GenericImageView;
@@ -31,19 +31,31 @@ pub async fn detection(
 }
 
 #[tauri::command]
-pub async fn ocr(app: AppHandle, image: Vec<u8>) -> CommandResult<String> {
+pub async fn ocr(app: AppHandle, image: Vec<u8>) -> CommandResult<Vec<String>> {
     let state = app.state::<AppState>();
+    let active_key = state.active_ocr.read().await.clone();
+    let pipelines = state.ocr_pipelines.read().await;
+    
+    if let Some(pipeline) = pipelines.get(&active_key) {
+        let img = image::load_from_memory(&image).context("Failed to load image")?;
+        let regions = pipeline.detect_text_regions(&img).await?;
+        pipeline.recognize_text(&img, &regions).await
+    } else {
+        Err(anyhow!("OCR engine not found: {}", active_key).into())
+    }
+}
 
-    let img = image::load_from_memory(&image).context("Failed to load image")?;
-
-    let result = state
-        .manga_ocr
-        .lock()
-        .await
-        .inference(&img)
-        .context("Failed to perform OCR")?;
-
-    Ok(result)
+#[tauri::command]
+pub async fn set_active_ocr(app: AppHandle, model_key: String) -> CommandResult<()> {
+    let state = app.state::<AppState>();
+    let pipelines = state.ocr_pipelines.read().await;
+    
+    if !pipelines.contains_key(&model_key) {
+        return Err(anyhow!("OCR model not found: {}", model_key).into());
+    }
+    
+    *state.active_ocr.write().await = model_key;
+    Ok(())
 }
 
 /// DEPRECATED: Full-image inpainting - replaced by inpaint_region with per-block processing

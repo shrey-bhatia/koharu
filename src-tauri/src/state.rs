@@ -1,13 +1,15 @@
 use comic_text_detector::ComicTextDetector;
 use lama::Lama;
-use manga_ocr::MangaOCR;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use serde::Serialize;
+use std::collections::HashMap;
+use std::sync::Arc;
+use crate::ocr_pipeline::{OcrPipeline, DeviceConfig};
 
 #[derive(Clone, Serialize, Debug)]
 pub struct GpuInitResult {
     pub requested_provider: String,
-    pub available_providers: Vec<String>,  // NEW: All available ORT providers
+    pub available_providers: Vec<String>,
     pub active_provider: String,
     pub device_id: u32,
     pub device_name: Option<String>,
@@ -18,7 +20,8 @@ pub struct GpuInitResult {
 #[derive(Debug)]
 pub struct AppState {
     pub comic_text_detector: Mutex<ComicTextDetector>,
-    pub manga_ocr: Mutex<MangaOCR>,
     pub lama: Mutex<Lama>,
     pub gpu_init_result: Mutex<GpuInitResult>,
+    pub ocr_pipelines: RwLock<HashMap<String, Arc<dyn OcrPipeline + Send + Sync>>>,
+    pub active_ocr: RwLock<String>,
 }

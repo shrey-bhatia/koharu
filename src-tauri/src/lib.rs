@@ -2,6 +2,11 @@ mod commands;
 mod error;
 mod state;
 mod text_renderer;
+mod model_package;
+mod hot_reload;
+mod accuracy;
+mod vertical_text_tests;
+mod ocr_pipeline;
 
 use comic_text_detector::ComicTextDetector;
 use lama::Lama;

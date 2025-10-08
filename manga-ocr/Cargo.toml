@@ -10,3 +10,13 @@ ort = { workspace = true }
 anyhow = { workspace = true }
 ndarray = { workspace = true }
 clap = { workspace = true }
+unicode-segmentation = "1.10"  # For CER/WER calculation
+sha2 = "0.10"  # SHA-256 checksums
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3.8"
+
+[[bench]]
+name = "ocr_benchmark"
+harness = false
