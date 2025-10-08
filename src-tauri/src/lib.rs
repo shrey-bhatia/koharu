@@ -135,9 +135,17 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
     let model_dir = app.path().app_data_dir()?.join("models");
     std::fs::create_dir_all(&model_dir)?;
     
-    // Initialize OCR pipelines
-    let ocr_pipeline = PaddleOcrPipeline::new(&model_dir, DeviceConfig::Cpu).await?;
-    ocr_pipelines.insert("default".to_string(), Arc::new(ocr_pipeline) as Arc<dyn OcrPipeline + Send + Sync>);
+    // Initialize OCR pipelines (optional - app can run without models)
+    match PaddleOcrPipeline::new(&model_dir, DeviceConfig::Cpu).await {
+        Ok(ocr_pipeline) => {
+            ocr_pipelines.insert("default".to_string(), Arc::new(ocr_pipeline) as Arc<dyn OcrPipeline + Send + Sync>);
+            tracing::info!("✓ OCR pipeline initialized successfully");
+        }
+        Err(e) => {
+            tracing::warn!("OCR pipeline initialization failed (models not available): {}", e);
+            tracing::info!("Application will continue without OCR functionality. Models can be added later.");
+        }
+    }
 
     // FAIL FAST: Verify requested provider is available before init
     match gpu_pref.as_str() {
