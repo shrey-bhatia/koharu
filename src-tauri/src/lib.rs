@@ -12,17 +12,20 @@ use comic_text_detector::ComicTextDetector;
 use lama::Lama;
 use manga_ocr::MangaOCR;
 use tauri::{AppHandle, Manager, async_runtime::spawn};
-use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+use tauri_plugin_dialog::{MessageDialogKind, DialogExt};
+use tokio::sync::RwLock;
+use std::collections::HashMap;
 use tokio::sync::Mutex;
 use std::fs;
+use std::sync::Arc;
+use std::path::PathBuf;
 
-use crate::{
-    commands::{
-        detection, ocr, get_system_fonts, inpaint_region, set_gpu_preference,
-        get_gpu_devices, get_current_gpu_status, run_gpu_stress_test,
-        translate_with_deepl, translate_with_ollama, render_and_export_image
-    },
-    state::{AppState, GpuInitResult},
+use crate::ocr_pipeline::{PaddleOcrPipeline, DeviceConfig, OcrPipeline};
+use crate::state::{AppState, GpuInitResult};
+use crate::commands::{
+    detection, ocr, get_system_fonts, inpaint_region, set_gpu_preference,
+    get_gpu_devices, get_current_gpu_status, run_gpu_stress_test,
+    translate_with_deepl, translate_with_ollama, render_and_export_image
 };
 
 // Read GPU preference from config file
@@ -122,6 +125,19 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
         success: false,
         warmup_time_ms: 0,
     };
+
+    // Create model instances (placeholder for now)
+    let comic_text_detector = ComicTextDetector::new()?;
+    let lama = Lama::new()?;
+    let mut ocr_pipelines = std::collections::HashMap::new();
+    
+    // Define model directory
+    let model_dir = app.path().app_data_dir()?.join("models");
+    std::fs::create_dir_all(&model_dir)?;
+    
+    // Initialize OCR pipelines
+    let ocr_pipeline = PaddleOcrPipeline::new(&model_dir, DeviceConfig::Cpu).await?;
+    ocr_pipelines.insert("default".to_string(), Arc::new(ocr_pipeline) as Arc<dyn OcrPipeline + Send + Sync>);
 
     // FAIL FAST: Verify requested provider is available before init
     match gpu_pref.as_str() {
@@ -249,9 +265,10 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
 
     app.manage(AppState {
         comic_text_detector: Mutex::new(comic_text_detector),
-        manga_ocr: Mutex::new(manga_ocr),
         lama: Mutex::new(lama),
         gpu_init_result: Mutex::new(init_result),
+        ocr_pipelines: RwLock::new(ocr_pipelines),
+        active_ocr: RwLock::new("default".to_string()),
     });
 
     app.get_webview_window("splashscreen").unwrap().close()?;

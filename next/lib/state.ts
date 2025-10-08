@@ -325,6 +325,12 @@ export const useEditorStore = create(
         }
         set({ gpuPreference: pref })
       },
+      setOcrEngine: (engine: 'manga-ocr' | 'paddle-ocr') => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('ocr_engine', engine)
+        }
+        set({ ocrEngine: engine })
+      },
       setCurrentStage: (stage: 'original' | 'textless' | 'rectangles' | 'final') => set({ currentStage: stage }),
       setPipelineStage: (stage: 'original' | 'textless' | 'withRectangles' | 'final', image: Image | null) =>
         set((state) => ({

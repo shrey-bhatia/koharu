@@ -134,7 +134,7 @@ impl VerticalTextTestSuite {
         let batch_accuracy = BatchAccuracy::calculate(samples);
 
         Ok(AccuracyResults {
-            accuracy: batch_accuracy,
+            accuracy: batch_accuracy.clone(),
             meets_threshold: batch_accuracy.meets_thresholds(0.03, 0.02), // 3% CER, 2% WER
         })
     }
@@ -146,7 +146,7 @@ pub struct TestResults {
     pub without_cls: AccuracyResults,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AccuracyResults {
     pub accuracy: BatchAccuracy,
     pub meets_threshold: bool,

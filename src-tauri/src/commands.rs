@@ -39,7 +39,8 @@ pub async fn ocr(app: AppHandle, image: Vec<u8>) -> CommandResult<Vec<String>> {
     if let Some(pipeline) = pipelines.get(&active_key) {
         let img = image::load_from_memory(&image).context("Failed to load image")?;
         let regions = pipeline.detect_text_regions(&img).await?;
-        pipeline.recognize_text(&img, &regions).await
+        let result = pipeline.recognize_text(&img, &regions).await?;
+        Ok(result)
     } else {
         Err(anyhow!("OCR engine not found: {}", active_key).into())
     }

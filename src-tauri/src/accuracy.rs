@@ -1,7 +1,7 @@
 use unicode_segmentation::UnicodeSegmentation;
-use std::collections::HashMap;
 
 /// Character Error Rate (CER) and Word Error Rate (WER) calculation
+#[derive(Debug, Clone)]
 pub struct AccuracyMetrics {
     pub cer: f64,
     pub wer: f64,
@@ -79,6 +79,7 @@ impl AccuracyMetrics {
 }
 
 /// Batch accuracy calculation for multiple samples
+#[derive(Debug, Clone)]
 pub struct BatchAccuracy {
     pub samples: Vec<SampleAccuracy>,
     pub average_cer: f64,
@@ -87,7 +88,7 @@ pub struct BatchAccuracy {
     pub max_wer: f64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SampleAccuracy {
     pub ground_truth: String,
     pub predicted: String,
@@ -100,8 +101,8 @@ impl BatchAccuracy {
         let mut sample_accuracies = Vec::new();
         let mut total_cer = 0.0;
         let mut total_wer = 0.0;
-        let mut max_cer = 0.0;
-        let mut max_wer = 0.0;
+        let mut max_cer = 0.0f64;
+        let mut max_wer = 0.0f64;
 
         for (ground_truth, predicted) in samples {
             let metrics = AccuracyMetrics::calculate(&ground_truth, &predicted);
