@@ -731,14 +731,14 @@ fn draw_unicode_debug_test(
     let red_color = Rgba([255, 0, 0, 255]);
     match load_font_by_family("Arial") {
         Ok(arial_font) => {
-            draw_text_mut(img, red_color, 20, 20, scale, &arial_font, &format!("Arial: {}", unicode_chars));
+            // draw_text_mut(img, red_color, 20, 20, scale, &arial_font, &format!("Arial: {}", unicode_chars));
         }
         Err(_) => {
             // Fallback to embedded font if Arial fails
             let font_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
             let fallback_font = FontArc::try_from_vec(font_data.to_vec())
                 .map_err(|e| anyhow::anyhow!("Failed to load embedded fallback font: {}", e))?;
-            draw_text_mut(img, red_color, 20, 20, scale, &fallback_font, &format!("Fallback: {}", unicode_chars));
+            // draw_text_mut(img, red_color, 20, 20, scale, &fallback_font, &format!("Fallback: {}", unicode_chars));
         }
     }
 
@@ -748,7 +748,7 @@ fn draw_unicode_debug_test(
         Ok(user_font) => {
             let test_text = format!("User: {}", unicode_chars);
             let text_width = measure_text_width(&test_text, &user_font, scale);
-            draw_text_mut(img, blue_color, (img_width as i32) - (text_width as i32) - 20, 20, scale, &user_font, &test_text);
+            // draw_text_mut(img, blue_color, (img_width as i32) - (text_width as i32) - 20, 20, scale, &user_font, &test_text);
         }
         Err(_) => {
             // Fallback message if user font fails
@@ -757,7 +757,7 @@ fn draw_unicode_debug_test(
                 .map_err(|e| anyhow::anyhow!("Failed to load embedded fallback font: {}", e))?;
             let fallback_text = "User Font Failed";
             let text_width = measure_text_width(fallback_text, &fallback_font, scale);
-            draw_text_mut(img, blue_color, (img_width as i32) - (text_width as i32) - 20, 20, scale, &fallback_font, fallback_text);
+            // draw_text_mut(img, blue_color, (img_width as i32) - (text_width as i32) - 20, 20, scale, &fallback_font, fallback_text);
         }
     }
 
@@ -770,23 +770,23 @@ fn draw_unicode_debug_test(
             let test_text = format!("Stack ({} fonts): {}", font_count, unicode_chars);
             let mut current_x = 20.0;
 
-            for c in test_text.chars() {
-                let char_str = c.to_string();
-                let (font, font_idx) = font_stack.font_for_char(c);
-                let char_width = measure_text_width(&char_str, font, scale);
+            // for c in test_text.chars() {
+            //     let char_str = c.to_string();
+            //     let (font, font_idx) = font_stack.font_for_char(c);
+            //     let char_width = measure_text_width(&char_str, font, scale);
 
-                draw_text_mut(
-                    img,
-                    yellow_color,
-                    current_x as i32,
-                    (img_height as i32) - 50,
-                    scale,
-                    font,
-                    &char_str,
-                );
+            //     draw_text_mut(
+            //         img,
+            //         yellow_color,
+            //         current_x as i32,
+            //         (img_height as i32) - 50,
+            //         scale,
+            //         font,
+            //         &char_str,
+            //     );
 
-                current_x += char_width;
-            }
+            //     current_x += char_width;
+            // }
         }
         Err(e) => {
             // Try GoNotoCJKCore as emergency fallback
@@ -797,29 +797,29 @@ fn draw_unicode_debug_test(
                     let test_text = format!("GoNoto ({}): {}", font_count, unicode_chars);
                     let mut current_x = 20.0;
 
-                    for c in test_text.chars() {
-                        let char_str = c.to_string();
-                        let char_width = measure_text_width(&char_str, &emergency_font, scale);
+                    // for c in test_text.chars() {
+                    //     let char_str = c.to_string();
+                    //     let char_width = measure_text_width(&char_str, &emergency_font, scale);
 
-                        draw_text_mut(
-                            img,
-                            yellow_color,
-                            current_x as i32,
-                            (img_height as i32) - 50,
-                            scale,
-                            &emergency_font,
-                            &char_str,
-                        );
+                    //     draw_text_mut(
+                    //         img,
+                    //         yellow_color,
+                    //         current_x as i32,
+                    //         (img_height as i32) - 50,
+                    //         scale,
+                    //         &emergency_font,
+                    //         &char_str,
+                    //     );
 
-                        current_x += char_width;
-                    }
+                    //     current_x += char_width;
+                    // }
                 }
                 Err(_) => {
                     // Final fallback to NotoSans
                     let noto_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
                     let fallback_font = FontArc::try_from_vec(noto_data.to_vec()).unwrap();
                     let error_msg = format!("Stack Error: {}", e.to_string().chars().take(15).collect::<String>());
-                    draw_text_mut(img, yellow_color, 20, (img_height as i32) - 50, scale, &fallback_font, &error_msg);
+                    // draw_text_mut(img, yellow_color, 20, (img_height as i32) - 50, scale, &fallback_font, &error_msg);
                 }
             }
         }

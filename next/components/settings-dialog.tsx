@@ -23,7 +23,9 @@ export default function SettingsDialog() {
     gpuPreference,
     setGpuPreference,
     defaultFont,
-    setDefaultFont
+    setDefaultFont,
+    ocrEngine,
+    setOcrEngine
   } = useEditorStore()
   const [open, setOpen] = useState(false)
   const [googleApiKeyInput, setGoogleApiKeyInput] = useState(translationApiKey || '')
@@ -155,6 +157,7 @@ export default function SettingsDialog() {
           <Tabs.List>
             <Tabs.Trigger value='translation'>Translation</Tabs.Trigger>
             <Tabs.Trigger value='render'>Render/Text</Tabs.Trigger>
+            <Tabs.Trigger value='ocr'>OCR Engine</Tabs.Trigger>
             <Tabs.Trigger value='gpu'>GPU & Performance</Tabs.Trigger>
           </Tabs.List>
 
@@ -430,6 +433,48 @@ export default function SettingsDialog() {
                 <Callout.Text>
                   <strong>Note:</strong> Make sure the selected font supports the languages you're translating to.
                   Not all fonts have complete Unicode coverage.
+                </Callout.Text>
+              </Callout.Root>
+            </div>
+          </Tabs.Content>
+
+          {/* OCR Engine Tab */}
+          <Tabs.Content value='ocr'>
+            <div className='mt-4 space-y-4'>
+              <div className='space-y-2'>
+                <label>
+                  <Text as='div' size='2' mb='1' weight='bold'>
+                    OCR Engine
+                  </Text>
+                  <Select.Root
+                    value={ocrEngine}
+                    onValueChange={(value: 'manga-ocr' | 'paddle-ocr') => {
+                      setOcrEngine(value);
+                      invoke('set_ocr_engine', { engine: value });
+                    }}
+                  >
+                    <Select.Trigger className='w-full' />
+                    <Select.Content>
+                      <Select.Item value='manga-ocr'>
+                        <div className='flex flex-col'>
+                          <span className='font-medium'>Manga OCR (Japanese Focused)</span>
+                          <span className='text-xs text-gray-500'>Optimized for Japanese manga text</span>
+                        </div>
+                      </Select.Item>
+                      <Select.Item value='paddle-ocr'>
+                        <div className='flex flex-col'>
+                          <span className='font-medium'>PaddleOCR v5 (Multi-language)</span>
+                          <span className='text-xs text-gray-500'>Supports vertical text & multiple languages</span>
+                        </div>
+                      </Select.Item>
+                    </Select.Content>
+                  </Select.Root>
+                </label>
+              </div>
+
+              <Callout.Root color='blue' size='1'>
+                <Callout.Text>
+                  <strong>Note:</strong> Changing OCR engine requires reloading the current image to take effect.
                 </Callout.Text>
               </Callout.Root>
             </div>
