@@ -51,7 +51,8 @@ export default function OCRPanel() {
           Math.floor(ymax - ymin)
         )
         const croppedBuffer = await imageBitmapToArrayBuffer(croppedBitmap)
-        const result = await invoke<string>('ocr', { image: Array.from(new Uint8Array(croppedBuffer)) })
+        const ocrResults = await invoke<string[]>('ocr', { image: Array.from(new Uint8Array(croppedBuffer)) })
+        const result = ocrResults.length > 0 ? ocrResults[0] : ''
         updatedBlocks.push({ ...block, text: result, ocrStale: false }) // Clear stale flag
       }
       setTextBlocks(updatedBlocks)

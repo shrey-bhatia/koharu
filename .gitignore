@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
+.roo/
 
 # Editor directories and files
 .vscode/*
@@ -42,3 +43,11 @@ models/
 elite-vault-*.json
 dont-commit-this-api-key-for-google-translation.txt
 dont-commit-deepl-api-key.txt
+
+# PaddleOCR assets
+*.pdmodel
+*.pdparams
+*.pdopt
+PaddleOCR-*/
+
+.roomodes

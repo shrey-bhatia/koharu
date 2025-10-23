@@ -36,6 +36,13 @@ glyph_brush_layout = "0.2"  # Proper text layout with kerning for accurate measu
 wgpu = "0.19"
 nvml-wrapper = { version = "0.10", optional = true }
 reqwest = { workspace = true }
+notify = "6.1"  # File watching for hot-reload
+tokio-stream = "0.1"  # Stream utilities for debouncing
+futures = "0.3"  # Future utilities
+sha2 = "0.10"  # SHA-256 checksums for model validation
+unicode-segmentation = "1.10"  # Text segmentation for CER/WER calculation
+ndarray = "0.15"  # N-dimensional arrays for tensor operations
+async-trait = "0.1"  # Async traits
 
 # internal dependencies
 comic-text-detector = { path = "../comic-text-detector" }
@@ -46,3 +53,12 @@ lama = { path = "../lama" }
 cuda = ["ort/cuda", "nvml-wrapper"]
 directml = ["ort/directml"]
 default = ["cuda"]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3.8"
+tokio-test = "0.4"
+
+[[bench]]
+name = "ocr_benchmark"
+harness = false

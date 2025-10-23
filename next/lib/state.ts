@@ -162,6 +162,12 @@ const loadTheme = (): 'light' | 'dark' => {
   return (localStorage.getItem('theme') as 'light' | 'dark') || 'light'
 }
 
+// Load OCR engine preference
+const loadOcrEngine = (): 'manga-ocr' | 'paddle-ocr' => {
+  if (typeof window === 'undefined') return 'manga-ocr'
+  return (localStorage.getItem('ocr_engine') as 'manga-ocr' | 'paddle-ocr') || 'manga-ocr'
+}
+
 // Load rendering method preference
 const loadRenderMethod = (): 'rectangle' | 'lama' | 'newlama' => {
   if (typeof window === 'undefined') return 'rectangle'
@@ -209,6 +215,8 @@ export const useEditorStore = create(
       inpaintingPreset: 'balanced' as 'fast' | 'balanced' | 'quality' | 'custom',
       defaultFont: loadDefaultFont(),
       fontSizeStep: 2,
+      availableOcrModels: ['manga-ocr', 'paddle-ocr'],
+      ocrEngine: loadOcrEngine(),
     } as {
       image: Image | null
       tool: string
@@ -226,6 +234,8 @@ export const useEditorStore = create(
       selectedBlockIndex: number | null
       gpuPreference: 'cuda' | 'directml' | 'cpu'
       currentStage: 'original' | 'textless' | 'rectangles' | 'final'
+      availableOcrModels: string[]
+      ocrEngine: 'manga-ocr' | 'paddle-ocr'
       pipelineStages: {
         original: Image | null
         textless: Image | null
@@ -314,6 +324,12 @@ export const useEditorStore = create(
           localStorage.setItem('gpu_preference', pref)
         }
         set({ gpuPreference: pref })
+      },
+      setOcrEngine: (engine: 'manga-ocr' | 'paddle-ocr') => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('ocr_engine', engine)
+        }
+        set({ ocrEngine: engine })
       },
       setCurrentStage: (stage: 'original' | 'textless' | 'rectangles' | 'final') => set({ currentStage: stage }),
       setPipelineStage: (stage: 'original' | 'textless' | 'withRectangles' | 'final', image: Image | null) =>
