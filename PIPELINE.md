@@ -87,22 +87,20 @@ Koharu is a manga translation application that uses AI models to detect, OCR, an
 
 ---
 
-### ❌ Stage 3: Segmentation Viewing (NOT IMPLEMENTED)
+### ✅ Stage 3: Segmentation Viewing (WORKING)
 
-**Intended Purpose**: Visualize the segmentation mask overlay
+**Purpose**: Visualize the segmentation mask overlay for QA before inpainting
 
 **Current State**:
-- Tool button exists in sidebar
-- Canvas has `<Layer>{tool === 'segmentation' && <Image image={null} />}</Layer>`
-- **MISSING**:
-  - No state to store segment mask
-  - No code to convert Vec<u8> → ImageBitmap
-  - No UI to display mask overlay
+- Detection stores the raw segmentation mask in state and prepares a resized `ImageBitmap`
+- Sidebar includes a `Show detection mask` toggle (defaults on after first detection)
+- Canvas renders a semi-transparent white overlay when the toggle or segmentation tool is active
+- Overlay automatically scales to the original image dimensions and ignores pointer events
 
-**What Needs to be Done**:
-1. Store `segment` from detection result in state
-2. Convert 1024x1024 grayscale buffer to ImageBitmap
-3. Render as semi-transparent overlay on canvas
+**Notes**:
+- Toggle disables when no mask is available
+- Layer opacity is ~60%; adjust in `canvas.tsx` if needed
+- Mask bitmap resources are released when a new image loads to avoid leaks
 
 ---
 

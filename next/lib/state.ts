@@ -106,6 +106,7 @@ export type TextBlock = {
   class: number
   text?: string
   translatedText?: string
+  manuallyEditedText?: boolean
   // Rendering fields (Option 1: Rectangle fill)
   backgroundColor?: RGB
   textColor?: RGB
@@ -186,6 +187,66 @@ const loadDefaultFont = (): string => {
   return localStorage.getItem('default_font') || 'Arial'
 }
 
+// Load selection sensitivity preference (screen-space pixels for hit target sizing)
+const loadSelectionSensitivity = (): number => {
+  if (typeof window === 'undefined') return 20
+  const stored = localStorage.getItem('selection_sensitivity')
+  const parsed = stored ? Number.parseFloat(stored) : NaN
+  if (!Number.isFinite(parsed)) return 20
+  return Math.min(Math.max(parsed, 10), 40)
+}
+
+type SidebarPersistenceState = {
+  sidebarWidth: number
+  lastExpandedSidebarWidth: number
+  isSidebarCollapsed: boolean
+}
+
+const DEFAULT_SIDEBAR_STATE: SidebarPersistenceState = {
+  sidebarWidth: 288,
+  lastExpandedSidebarWidth: 288,
+  isSidebarCollapsed: false,
+}
+
+const SIDEBAR_STATE_STORAGE_KEY = 'sidebar_state'
+
+const loadSidebarState = (): SidebarPersistenceState => {
+  if (typeof window === 'undefined') return DEFAULT_SIDEBAR_STATE
+
+  try {
+    const raw = localStorage.getItem(SIDEBAR_STATE_STORAGE_KEY)
+    if (!raw) return DEFAULT_SIDEBAR_STATE
+
+    const parsed = JSON.parse(raw) as Partial<SidebarPersistenceState> | null
+    const sidebarWidth = Number(parsed?.sidebarWidth)
+    const lastExpandedSidebarWidth = Number(parsed?.lastExpandedSidebarWidth)
+    const isSidebarCollapsed = Boolean(parsed?.isSidebarCollapsed)
+
+    return {
+      sidebarWidth: Number.isFinite(sidebarWidth) ? sidebarWidth : DEFAULT_SIDEBAR_STATE.sidebarWidth,
+      lastExpandedSidebarWidth: Number.isFinite(lastExpandedSidebarWidth)
+        ? lastExpandedSidebarWidth
+        : DEFAULT_SIDEBAR_STATE.lastExpandedSidebarWidth,
+      isSidebarCollapsed,
+    }
+  } catch (error) {
+    console.warn('Failed to load sidebar state:', error)
+    return DEFAULT_SIDEBAR_STATE
+  }
+}
+
+const persistSidebarState = (state: SidebarPersistenceState) => {
+  if (typeof window === 'undefined') return
+
+  try {
+    localStorage.setItem(SIDEBAR_STATE_STORAGE_KEY, JSON.stringify(state))
+  } catch (error) {
+    console.warn('Failed to persist sidebar state:', error)
+  }
+}
+
+const initialSidebarState = loadSidebarState()
+
 export const useEditorStore = create(
   combine(
     {
@@ -197,8 +258,10 @@ export const useEditorStore = create(
       deeplApiKey: loadDeeplApiKey(),
       ollamaModel: loadOllamaModel(),
       ollamaSystemPrompt: loadOllamaSystemPrompt(),
-      translationProvider: loadTranslationProvider(),
-      segmentationMask: null,
+  translationProvider: loadTranslationProvider(),
+  segmentationMask: null,
+  segmentationMaskBitmap: null,
+  showSegmentationMask: false,
       inpaintedImage: null,
       theme: loadTheme(),
       renderMethod: loadRenderMethod(),
@@ -217,6 +280,10 @@ export const useEditorStore = create(
       fontSizeStep: 2,
       availableOcrModels: ['manga-ocr', 'paddle-ocr'],
       ocrEngine: loadOcrEngine(),
+      selectionSensitivity: loadSelectionSensitivity(),
+      sidebarWidth: initialSidebarState.sidebarWidth,
+      lastExpandedSidebarWidth: initialSidebarState.lastExpandedSidebarWidth,
+      isSidebarCollapsed: initialSidebarState.isSidebarCollapsed,
     } as {
       image: Image | null
       tool: string
@@ -227,7 +294,9 @@ export const useEditorStore = create(
       ollamaModel: string
       ollamaSystemPrompt: string
       translationProvider: 'google' | 'deepl-free' | 'deepl-pro' | 'ollama'
-      segmentationMask: number[] | null
+  segmentationMask: number[] | null
+  segmentationMaskBitmap: ImageBitmap | null
+  showSegmentationMask: boolean
       inpaintedImage: Image | null
       theme: 'light' | 'dark'
       renderMethod: 'rectangle' | 'lama' | 'newlama'
@@ -246,21 +315,37 @@ export const useEditorStore = create(
       inpaintingPreset: 'fast' | 'balanced' | 'quality' | 'custom'
       defaultFont: string
       fontSizeStep: number
+      selectionSensitivity: number
+      sidebarWidth: number
+      lastExpandedSidebarWidth: number
+      isSidebarCollapsed: boolean
     },
     (set) => ({
-      setImage: (image: Image | null) => set({
-        image,
-        currentStage: 'original',
-        pipelineStages: {
-          original: null,
-          textless: null,
-          withRectangles: null,
-          final: null,
-        },
-        textBlocks: [],
-        segmentationMask: null,
-        inpaintedImage: null,
-        selectedBlockIndex: null,
+      setImage: (image: Image | null) => set((state) => {
+        if (state.segmentationMaskBitmap) {
+          try {
+            state.segmentationMaskBitmap.close()
+          } catch (error) {
+            console.warn('Failed to release segmentation mask bitmap:', error)
+          }
+        }
+
+        return {
+          image,
+          currentStage: 'original',
+          pipelineStages: {
+            original: null,
+            textless: null,
+            withRectangles: null,
+            final: null,
+          },
+          textBlocks: [],
+          segmentationMask: null,
+          segmentationMaskBitmap: null,
+          inpaintedImage: null,
+          selectedBlockIndex: null,
+          showSegmentationMask: false,
+        }
       }),
       setTool: (tool: string) => set({ tool }),
       setScale: (scale: number) => set({ scale }),
@@ -304,6 +389,18 @@ export const useEditorStore = create(
         set({ ollamaSystemPrompt: prompt })
       },
       setSegmentationMask: (mask: number[] | null) => set({ segmentationMask: mask }),
+      setSegmentationMaskBitmap: (bitmap: ImageBitmap | null) =>
+        set((state) => {
+          if (state.segmentationMaskBitmap && state.segmentationMaskBitmap !== bitmap) {
+            try {
+              state.segmentationMaskBitmap.close()
+            } catch (error) {
+              console.warn('Failed to release segmentation mask bitmap:', error)
+            }
+          }
+          return { segmentationMaskBitmap: bitmap }
+        }),
+      setShowSegmentationMask: (show: boolean) => set({ showSegmentationMask: show }),
       setInpaintedImage: (image: Image | null) => set({ inpaintedImage: image }),
       setTheme: (theme: 'light' | 'dark') => {
         if (typeof window !== 'undefined') {
@@ -353,6 +450,48 @@ export const useEditorStore = create(
         set({ defaultFont: font })
       },
       setFontSizeStep: (step: number) => set({ fontSizeStep: step }),
+      setSelectionSensitivity: (value: number) => {
+        const clamped = Math.min(Math.max(value, 10), 40)
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('selection_sensitivity', clamped.toString())
+        }
+        set({ selectionSensitivity: clamped })
+      },
+      setSidebarWidth: (width: number) =>
+        set((state) => {
+          const sanitizedWidth = Number.isFinite(width) ? width : state.sidebarWidth
+          if (typeof window !== 'undefined') {
+            persistSidebarState({
+              sidebarWidth: sanitizedWidth,
+              lastExpandedSidebarWidth: state.lastExpandedSidebarWidth,
+              isSidebarCollapsed: state.isSidebarCollapsed,
+            })
+          }
+          return { sidebarWidth: sanitizedWidth }
+        }),
+      setLastExpandedSidebarWidth: (width: number) =>
+        set((state) => {
+          const sanitizedWidth = Number.isFinite(width) ? width : state.lastExpandedSidebarWidth
+          if (typeof window !== 'undefined') {
+            persistSidebarState({
+              sidebarWidth: state.sidebarWidth,
+              lastExpandedSidebarWidth: sanitizedWidth,
+              isSidebarCollapsed: state.isSidebarCollapsed,
+            })
+          }
+          return { lastExpandedSidebarWidth: sanitizedWidth }
+        }),
+      setIsSidebarCollapsed: (collapsed: boolean) =>
+        set((state) => {
+          if (typeof window !== 'undefined') {
+            persistSidebarState({
+              sidebarWidth: state.sidebarWidth,
+              lastExpandedSidebarWidth: state.lastExpandedSidebarWidth,
+              isSidebarCollapsed: collapsed,
+            })
+          }
+          return { isSidebarCollapsed: collapsed }
+        }),
     })
   )
 )

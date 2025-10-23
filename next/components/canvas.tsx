@@ -1,7 +1,7 @@
 'use client'
 
 import type Konva from 'konva'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Circle,
   Image,
@@ -15,17 +15,55 @@ import ScaleControl from './scale-control'
 import { useEditorStore } from '@/lib/state'
 
 function Canvas() {
-  const { tool, scale, image, textBlocks, setTextBlocks, inpaintedImage, selectedBlockIndex, setSelectedBlockIndex, currentStage, pipelineStages, renderMethod } = useEditorStore()
+  const {
+    tool,
+    scale,
+    image,
+    textBlocks,
+    setTextBlocks,
+    inpaintedImage,
+    segmentationMaskBitmap,
+    showSegmentationMask,
+    selectedBlockIndex,
+    setSelectedBlockIndex,
+    currentStage,
+    pipelineStages,
+    renderMethod,
+    selectionSensitivity,
+  } = useEditorStore()
   const containerRef = useRef<HTMLDivElement>(null)
   const inpaintLayerRef = useRef<Konva.Layer>(null)
 
   const [selected, setSelected] = useState<any>(null)
+  const [isTouchDevice, setIsTouchDevice] = useState(false)
   const transformerRef = useRef<Konva.Transformer>(null)
+  const safeScale = Math.max(scale, 0.001)
 
   useEffect(() => {
     transformerRef.current?.nodes(selected ? [selected] : [])
     transformerRef.current?.getLayer()?.batchDraw()
   }, [selected])
+
+  useEffect(() => {
+    transformerRef.current?.getLayer()?.batchDraw()
+  }, [scale, selectionSensitivity])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const nav = navigator as Navigator & { msMaxTouchPoints?: number }
+    const touchCapable =
+      'ontouchstart' in window || (nav.maxTouchPoints ?? 0) > 0 || (nav.msMaxTouchPoints ?? 0) > 0
+    setIsTouchDevice(touchCapable)
+  }, [])
+
+  const handleSelectBlock = useCallback(
+    (event: any, index: number) => {
+      event.cancelBubble = true
+      setSelectedBlockIndex(index)
+      setSelected(event.target)
+    },
+    [setSelectedBlockIndex, setSelected]
+  )
 
   // Handler for when a box is transformed (scaled/rotated/resized)
   const handleTransformEnd = (index: number) => {
@@ -77,6 +115,7 @@ function Canvas() {
 
   const baseImage = getBaseImage()
   const shouldShowOverlays = tool === 'render' && (currentStage === 'rectangles' || currentStage === 'final')
+  const shouldShowMaskOverlay = Boolean(segmentationMaskBitmap && (tool === 'segmentation' || showSegmentationMask))
 
   return (
     <>
@@ -88,14 +127,27 @@ function Canvas() {
               scaleY={scale}
               width={image?.bitmap.width * scale || 0}
               height={image?.bitmap.height * scale || 0}
+              dragDistance={isTouchDevice ? 10 : 3}
               onClick={() => {
                 setSelected(null)
+                setSelectedBlockIndex(null)
+              }}
+              onTap={() => {
+                setSelected(null)
+                setSelectedBlockIndex(null)
               }}
             >
               {/* Layer 1: Base image (respects pipeline stage) */}
               <Layer>
                 <Image image={baseImage} />
               </Layer>
+
+              {/* Layer 1.5: Segmentation overlay */}
+              {shouldShowMaskOverlay && (
+                <Layer listening={false} opacity={0.6}>
+                  <Image image={segmentationMaskBitmap || null} listening={false} />
+                </Layer>
+              )}
 
               {/* Layer 2: Rectangle fills (render mode, only for 'rectangles' and 'final' stages) */}
               {shouldShowOverlays && renderMethod === 'rectangle' && (
@@ -186,10 +238,13 @@ function Canvas() {
                                 ? 'orange'
                                 : 'red'
                           }
-                          strokeWidth={(selectedBlockIndex === index ? 3 : 2) / scale}
+                          strokeWidth={(selectedBlockIndex === index ? 3 : 2) / safeScale}
                           strokeScaleEnabled={false}
-                          onClick={(e) => {
-                            e.cancelBubble = true
+                          perfectDrawEnabled={false}
+                          hitStrokeWidth={Math.max(selectionSensitivity / safeScale, 8)}
+                          onClick={(e) => handleSelectBlock(e, index)}
+                          onTap={(e) => handleSelectBlock(e, index)}
+                          onDragStart={(e) => {
                             setSelectedBlockIndex(index)
                             setSelected(e.target)
                           }}
@@ -214,7 +269,7 @@ function Canvas() {
                           key={`circle-${index}`}
                           x={xmin}
                           y={ymin}
-                          radius={20 / scale}
+                          radius={20 / safeScale}
                           fill='rgba(255, 0, 0, 0.7)'
                           listening={false}
                         />
@@ -223,7 +278,7 @@ function Canvas() {
                           x={xmin - 10 / scale}
                           y={ymin - 15 / scale}
                           text={(index + 1).toString()}
-                          fontSize={30 / scale}
+                          fontSize={30 / safeScale}
                           fill='white'
                           fontFamily='sans-serif'
                           listening={false}
@@ -231,7 +286,15 @@ function Canvas() {
                       </>
                     )
                   })}
-                  {selected && <Transformer ref={transformerRef} nodes={[selected]} />}
+                  {selected && (
+                    <Transformer
+                      ref={transformerRef}
+                      nodes={[selected]}
+                      anchorSize={Math.max((selectionSensitivity * 0.7) / safeScale, 8)}
+                      padding={Math.max((selectionSensitivity * 0.6) / safeScale, 6)}
+                      borderStrokeWidth={Math.max(1 / safeScale, 0.5)}
+                    />
+                  )}
                 </Layer>
               )}
               <Layer>{tool === 'segmentation' && <Image image={null} />}</Layer>
