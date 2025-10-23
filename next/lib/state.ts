@@ -106,6 +106,7 @@ export type TextBlock = {
   class: number
   text?: string
   translatedText?: string
+  manuallyEditedText?: boolean
   // Rendering fields (Option 1: Rectangle fill)
   backgroundColor?: RGB
   textColor?: RGB
