@@ -187,6 +187,15 @@ const loadDefaultFont = (): string => {
   return localStorage.getItem('default_font') || 'Arial'
 }
 
+// Load selection sensitivity preference (screen-space pixels for hit target sizing)
+const loadSelectionSensitivity = (): number => {
+  if (typeof window === 'undefined') return 20
+  const stored = localStorage.getItem('selection_sensitivity')
+  const parsed = stored ? Number.parseFloat(stored) : NaN
+  if (!Number.isFinite(parsed)) return 20
+  return Math.min(Math.max(parsed, 10), 40)
+}
+
 export const useEditorStore = create(
   combine(
     {
@@ -218,6 +227,7 @@ export const useEditorStore = create(
       fontSizeStep: 2,
       availableOcrModels: ['manga-ocr', 'paddle-ocr'],
       ocrEngine: loadOcrEngine(),
+      selectionSensitivity: loadSelectionSensitivity(),
     } as {
       image: Image | null
       tool: string
@@ -247,6 +257,7 @@ export const useEditorStore = create(
       inpaintingPreset: 'fast' | 'balanced' | 'quality' | 'custom'
       defaultFont: string
       fontSizeStep: number
+      selectionSensitivity: number
     },
     (set) => ({
       setImage: (image: Image | null) => set({
@@ -354,6 +365,13 @@ export const useEditorStore = create(
         set({ defaultFont: font })
       },
       setFontSizeStep: (step: number) => set({ fontSizeStep: step }),
+      setSelectionSensitivity: (value: number) => {
+        const clamped = Math.min(Math.max(value, 10), 40)
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('selection_sensitivity', clamped.toString())
+        }
+        set({ selectionSensitivity: clamped })
+      },
     })
   )
 )

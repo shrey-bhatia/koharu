@@ -15,17 +15,35 @@ import ScaleControl from './scale-control'
 import { useEditorStore } from '@/lib/state'
 
 function Canvas() {
-  const { tool, scale, image, textBlocks, setTextBlocks, inpaintedImage, selectedBlockIndex, setSelectedBlockIndex, currentStage, pipelineStages, renderMethod } = useEditorStore()
+  const {
+    tool,
+    scale,
+    image,
+    textBlocks,
+    setTextBlocks,
+    inpaintedImage,
+    selectedBlockIndex,
+    setSelectedBlockIndex,
+    currentStage,
+    pipelineStages,
+    renderMethod,
+    selectionSensitivity,
+  } = useEditorStore()
   const containerRef = useRef<HTMLDivElement>(null)
   const inpaintLayerRef = useRef<Konva.Layer>(null)
 
   const [selected, setSelected] = useState<any>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
+  const safeScale = Math.max(scale, 0.001)
 
   useEffect(() => {
     transformerRef.current?.nodes(selected ? [selected] : [])
     transformerRef.current?.getLayer()?.batchDraw()
   }, [selected])
+
+  useEffect(() => {
+    transformerRef.current?.getLayer()?.batchDraw()
+  }, [scale, selectionSensitivity])
 
   // Handler for when a box is transformed (scaled/rotated/resized)
   const handleTransformEnd = (index: number) => {
@@ -186,8 +204,10 @@ function Canvas() {
                                 ? 'orange'
                                 : 'red'
                           }
-                          strokeWidth={(selectedBlockIndex === index ? 3 : 2) / scale}
+                          strokeWidth={(selectedBlockIndex === index ? 3 : 2) / safeScale}
                           strokeScaleEnabled={false}
+                          perfectDrawEnabled={false}
+                          hitStrokeWidth={Math.max(selectionSensitivity / safeScale, 8)}
                           onClick={(e) => {
                             e.cancelBubble = true
                             setSelectedBlockIndex(index)
@@ -214,7 +234,7 @@ function Canvas() {
                           key={`circle-${index}`}
                           x={xmin}
                           y={ymin}
-                          radius={20 / scale}
+                          radius={20 / safeScale}
                           fill='rgba(255, 0, 0, 0.7)'
                           listening={false}
                         />
@@ -223,7 +243,7 @@ function Canvas() {
                           x={xmin - 10 / scale}
                           y={ymin - 15 / scale}
                           text={(index + 1).toString()}
-                          fontSize={30 / scale}
+                          fontSize={30 / safeScale}
                           fill='white'
                           fontFamily='sans-serif'
                           listening={false}
@@ -231,7 +251,15 @@ function Canvas() {
                       </>
                     )
                   })}
-                  {selected && <Transformer ref={transformerRef} nodes={[selected]} />}
+                  {selected && (
+                    <Transformer
+                      ref={transformerRef}
+                      nodes={[selected]}
+                      anchorSize={Math.max((selectionSensitivity * 0.7) / safeScale, 8)}
+                      padding={Math.max((selectionSensitivity * 0.6) / safeScale, 6)}
+                      borderStrokeWidth={Math.max(1 / safeScale, 0.5)}
+                    />
+                  )}
                 </Layer>
               )}
               <Layer>{tool === 'segmentation' && <Image image={null} />}</Layer>

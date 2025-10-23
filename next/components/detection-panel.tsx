@@ -8,7 +8,14 @@ import { useEditorStore } from '@/lib/state'
 import { analyzeTextAppearance } from '@/utils/appearance-analysis'
 
 export default function DetectionPanel() {
-  const { image, textBlocks, setTextBlocks, setSegmentationMask } = useEditorStore()
+  const {
+    image,
+    textBlocks,
+    setTextBlocks,
+    setSegmentationMask,
+    selectionSensitivity,
+    setSelectionSensitivity,
+  } = useEditorStore()
   const [loading, setLoading] = useState(false)
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.5)
   const [nmsThreshold, setNmsThreshold] = useState(0.5)
@@ -93,6 +100,20 @@ export default function DetectionPanel() {
               step={0.01}
               value={[nmsThreshold]}
               onValueChange={(value) => setNmsThreshold(value[0])}
+            />
+          </div>
+          <div className='flex flex-col gap-1'>
+            <div className='flex items-center justify-between'>
+              <span>Selection sensitivity</span>
+              <span>{selectionSensitivity.toFixed(0)} px</span>
+            </div>
+            <Slider
+              size='1'
+              min={10}
+              max={36}
+              step={1}
+              value={[selectionSensitivity]}
+              onValueChange={(value) => setSelectionSensitivity(value[0])}
             />
           </div>
           <Text>
