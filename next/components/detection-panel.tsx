@@ -62,10 +62,10 @@ export default function DetectionPanel() {
   }
 
   return (
-    <div className='flex w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md'>
+    <div className='flex w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md dark:border-gray-700 dark:bg-gray-800'>
       {/* Header */}
       <div className='flex items-center p-3'>
-        <h2 className='font-medium'>Detection</h2>
+        <h2 className='font-medium text-gray-900 dark:text-gray-100'>Detection</h2>
         <div className='flex-grow'></div>
         <Button onClick={run} loading={loading} variant='soft'>
           <Play className='h-4 w-4' />
@@ -73,11 +73,11 @@ export default function DetectionPanel() {
       </div>
       {/* Body */}
       <div className='flex flex-col justify-center'>
-        <div className='flex flex-col gap-2 border-b border-gray-200 px-4 py-2 text-sm'>
+        <div className='flex flex-col gap-2 border-b border-gray-200 px-4 py-2 text-sm text-gray-700 dark:border-gray-700 dark:text-gray-300'>
           <div className='flex flex-col gap-1'>
             <div className='flex items-center justify-between'>
-              <span>Confidence threshold</span>
-              <span>{confidenceThreshold}</span>
+              <span className='font-medium text-gray-800 dark:text-gray-100'>Confidence threshold</span>
+              <span className='font-mono text-gray-900 dark:text-gray-100'>{confidenceThreshold}</span>
             </div>
             <Slider
               size='1'
@@ -90,8 +90,8 @@ export default function DetectionPanel() {
           </div>
           <div className='flex flex-col gap-1'>
             <div className='flex items-center justify-between'>
-              <span>NMS threshold</span>
-              <span>{nmsThreshold}</span>
+              <span className='font-medium text-gray-800 dark:text-gray-100'>NMS threshold</span>
+              <span className='font-mono text-gray-900 dark:text-gray-100'>{nmsThreshold}</span>
             </div>
             <Slider
               size='1'
@@ -104,8 +104,8 @@ export default function DetectionPanel() {
           </div>
           <div className='flex flex-col gap-1'>
             <div className='flex items-center justify-between'>
-              <span>Selection sensitivity</span>
-              <span>{selectionSensitivity.toFixed(0)} px</span>
+              <span className='font-medium text-gray-800 dark:text-gray-100'>Selection sensitivity</span>
+              <span className='font-mono text-gray-900 dark:text-gray-100'>{selectionSensitivity.toFixed(0)} px</span>
             </div>
             <Slider
               size='1'
@@ -116,7 +116,7 @@ export default function DetectionPanel() {
               onValueChange={(value) => setSelectionSensitivity(value[0])}
             />
           </div>
-          <Text>
+          <Text className='text-gray-700 dark:text-gray-300'>
             <strong>{textBlocks.length}</strong> text blocks detected
           </Text>
         </div>

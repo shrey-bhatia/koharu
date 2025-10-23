@@ -229,10 +229,10 @@ export default function InpaintPanel() {
   }
 
   return (
-    <div className='flex w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md'>
+    <div className='flex w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md dark:border-gray-700 dark:bg-gray-800'>
       {/* Header */}
       <div className='flex items-center p-3'>
-        <h2 className='font-medium'>Inpainting</h2>
+        <h2 className='font-medium text-gray-900 dark:text-gray-100'>Inpainting</h2>
         <div className='flex-grow'></div>
         <Button
           onClick={runInpaint}
@@ -259,29 +259,29 @@ export default function InpaintPanel() {
       )}
 
       {/* Body */}
-      <div className='flex flex-col gap-2 p-3'>
+      <div className='flex flex-col gap-2 p-3 text-gray-700 dark:text-gray-300'>
         {/* Info */}
-        <div className='text-sm text-gray-600'>
+        <div className='text-sm text-gray-600 dark:text-gray-300'>
           <p>Removes Japanese text from manga using AI inpainting</p>
         </div>
 
         {/* Status */}
         <div className='flex flex-col gap-1 text-sm'>
-          <div className='flex items-center justify-between'>
+          <div className='flex items-center justify-between text-gray-700 dark:text-gray-300'>
             <span>Image:</span>
-            <span className={image ? 'text-green-600' : 'text-gray-400'}>
+            <span className={image ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}>
               {image ? '✓ Loaded' : 'Not loaded'}
             </span>
           </div>
-          <div className='flex items-center justify-between'>
+          <div className='flex items-center justify-between text-gray-700 dark:text-gray-300'>
             <span>Segmentation mask:</span>
-            <span className={segmentationMask ? 'text-green-600' : 'text-gray-400'}>
+            <span className={segmentationMask ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}>
               {segmentationMask ? `✓ Ready (${segmentationMask.length} bytes)` : 'Run detection'}
             </span>
           </div>
-          <div className='flex items-center justify-between'>
+          <div className='flex items-center justify-between text-gray-700 dark:text-gray-300'>
             <span>Text regions:</span>
-            <span className={textBlocks.length > 0 ? 'text-green-600' : 'text-gray-400'}>
+            <span className={textBlocks.length > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}>
               {textBlocks.length > 0 ? `${textBlocks.length} detected` : 'None'}
             </span>
           </div>
@@ -321,7 +321,7 @@ export default function InpaintPanel() {
         {loading && (renderMethod === 'lama' || renderMethod === 'newlama') && (
           <div className='space-y-2'>
             <Progress value={progress * 100} />
-            <p className='text-sm text-gray-600'>
+            <p className='text-sm text-gray-600 dark:text-gray-300'>
               Processing block {currentBlock} of {textBlocks.length}...
             </p>
             <Button size='1' color='red' variant='soft' onClick={() => setCancelled(true)}>
@@ -333,7 +333,7 @@ export default function InpaintPanel() {
 
         {/* Loading info for full inpainting */}
         {loading && renderMethod !== 'lama' && renderMethod !== 'newlama' && (
-          <div className='text-sm text-gray-600'>
+          <div className='text-sm text-gray-600 dark:text-gray-300'>
             <p>Processing with LaMa AI model...</p>
             <p className='text-xs'>This may take 5-15 seconds depending on image size.</p>
           </div>
