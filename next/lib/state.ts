@@ -196,6 +196,57 @@ const loadSelectionSensitivity = (): number => {
   return Math.min(Math.max(parsed, 10), 40)
 }
 
+type SidebarPersistenceState = {
+  sidebarWidth: number
+  lastExpandedSidebarWidth: number
+  isSidebarCollapsed: boolean
+}
+
+const DEFAULT_SIDEBAR_STATE: SidebarPersistenceState = {
+  sidebarWidth: 288,
+  lastExpandedSidebarWidth: 288,
+  isSidebarCollapsed: false,
+}
+
+const SIDEBAR_STATE_STORAGE_KEY = 'sidebar_state'
+
+const loadSidebarState = (): SidebarPersistenceState => {
+  if (typeof window === 'undefined') return DEFAULT_SIDEBAR_STATE
+
+  try {
+    const raw = localStorage.getItem(SIDEBAR_STATE_STORAGE_KEY)
+    if (!raw) return DEFAULT_SIDEBAR_STATE
+
+    const parsed = JSON.parse(raw) as Partial<SidebarPersistenceState> | null
+    const sidebarWidth = Number(parsed?.sidebarWidth)
+    const lastExpandedSidebarWidth = Number(parsed?.lastExpandedSidebarWidth)
+    const isSidebarCollapsed = Boolean(parsed?.isSidebarCollapsed)
+
+    return {
+      sidebarWidth: Number.isFinite(sidebarWidth) ? sidebarWidth : DEFAULT_SIDEBAR_STATE.sidebarWidth,
+      lastExpandedSidebarWidth: Number.isFinite(lastExpandedSidebarWidth)
+        ? lastExpandedSidebarWidth
+        : DEFAULT_SIDEBAR_STATE.lastExpandedSidebarWidth,
+      isSidebarCollapsed,
+    }
+  } catch (error) {
+    console.warn('Failed to load sidebar state:', error)
+    return DEFAULT_SIDEBAR_STATE
+  }
+}
+
+const persistSidebarState = (state: SidebarPersistenceState) => {
+  if (typeof window === 'undefined') return
+
+  try {
+    localStorage.setItem(SIDEBAR_STATE_STORAGE_KEY, JSON.stringify(state))
+  } catch (error) {
+    console.warn('Failed to persist sidebar state:', error)
+  }
+}
+
+const initialSidebarState = loadSidebarState()
+
 export const useEditorStore = create(
   combine(
     {
@@ -228,6 +279,9 @@ export const useEditorStore = create(
       availableOcrModels: ['manga-ocr', 'paddle-ocr'],
       ocrEngine: loadOcrEngine(),
       selectionSensitivity: loadSelectionSensitivity(),
+      sidebarWidth: initialSidebarState.sidebarWidth,
+      lastExpandedSidebarWidth: initialSidebarState.lastExpandedSidebarWidth,
+      isSidebarCollapsed: initialSidebarState.isSidebarCollapsed,
     } as {
       image: Image | null
       tool: string
@@ -258,6 +312,9 @@ export const useEditorStore = create(
       defaultFont: string
       fontSizeStep: number
       selectionSensitivity: number
+      sidebarWidth: number
+      lastExpandedSidebarWidth: number
+      isSidebarCollapsed: boolean
     },
     (set) => ({
       setImage: (image: Image | null) => set({
@@ -372,6 +429,41 @@ export const useEditorStore = create(
         }
         set({ selectionSensitivity: clamped })
       },
+      setSidebarWidth: (width: number) =>
+        set((state) => {
+          const sanitizedWidth = Number.isFinite(width) ? width : state.sidebarWidth
+          if (typeof window !== 'undefined') {
+            persistSidebarState({
+              sidebarWidth: sanitizedWidth,
+              lastExpandedSidebarWidth: state.lastExpandedSidebarWidth,
+              isSidebarCollapsed: state.isSidebarCollapsed,
+            })
+          }
+          return { sidebarWidth: sanitizedWidth }
+        }),
+      setLastExpandedSidebarWidth: (width: number) =>
+        set((state) => {
+          const sanitizedWidth = Number.isFinite(width) ? width : state.lastExpandedSidebarWidth
+          if (typeof window !== 'undefined') {
+            persistSidebarState({
+              sidebarWidth: state.sidebarWidth,
+              lastExpandedSidebarWidth: sanitizedWidth,
+              isSidebarCollapsed: state.isSidebarCollapsed,
+            })
+          }
+          return { lastExpandedSidebarWidth: sanitizedWidth }
+        }),
+      setIsSidebarCollapsed: (collapsed: boolean) =>
+        set((state) => {
+          if (typeof window !== 'undefined') {
+            persistSidebarState({
+              sidebarWidth: state.sidebarWidth,
+              lastExpandedSidebarWidth: state.lastExpandedSidebarWidth,
+              isSidebarCollapsed: collapsed,
+            })
+          }
+          return { isSidebarCollapsed: collapsed }
+        }),
     })
   )
 )
