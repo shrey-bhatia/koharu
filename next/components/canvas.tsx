@@ -1,7 +1,7 @@
 'use client'
 
 import type Konva from 'konva'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Circle,
   Image,
@@ -33,6 +33,7 @@ function Canvas() {
   const inpaintLayerRef = useRef<Konva.Layer>(null)
 
   const [selected, setSelected] = useState<any>(null)
+  const [isTouchDevice, setIsTouchDevice] = useState(false)
   const transformerRef = useRef<Konva.Transformer>(null)
   const safeScale = Math.max(scale, 0.001)
 
@@ -44,6 +45,23 @@ function Canvas() {
   useEffect(() => {
     transformerRef.current?.getLayer()?.batchDraw()
   }, [scale, selectionSensitivity])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const nav = navigator as Navigator & { msMaxTouchPoints?: number }
+    const touchCapable =
+      'ontouchstart' in window || (nav.maxTouchPoints ?? 0) > 0 || (nav.msMaxTouchPoints ?? 0) > 0
+    setIsTouchDevice(touchCapable)
+  }, [])
+
+  const handleSelectBlock = useCallback(
+    (event: any, index: number) => {
+      event.cancelBubble = true
+      setSelectedBlockIndex(index)
+      setSelected(event.target)
+    },
+    [setSelectedBlockIndex, setSelected]
+  )
 
   // Handler for when a box is transformed (scaled/rotated/resized)
   const handleTransformEnd = (index: number) => {
@@ -106,8 +124,14 @@ function Canvas() {
               scaleY={scale}
               width={image?.bitmap.width * scale || 0}
               height={image?.bitmap.height * scale || 0}
+              dragDistance={isTouchDevice ? 10 : 3}
               onClick={() => {
                 setSelected(null)
+                setSelectedBlockIndex(null)
+              }}
+              onTap={() => {
+                setSelected(null)
+                setSelectedBlockIndex(null)
               }}
             >
               {/* Layer 1: Base image (respects pipeline stage) */}
@@ -208,8 +232,9 @@ function Canvas() {
                           strokeScaleEnabled={false}
                           perfectDrawEnabled={false}
                           hitStrokeWidth={Math.max(selectionSensitivity / safeScale, 8)}
-                          onClick={(e) => {
-                            e.cancelBubble = true
+                          onClick={(e) => handleSelectBlock(e, index)}
+                          onTap={(e) => handleSelectBlock(e, index)}
+                          onDragStart={(e) => {
                             setSelectedBlockIndex(index)
                             setSelected(e.target)
                           }}
