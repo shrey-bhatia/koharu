@@ -16,7 +16,7 @@ Complete the manga translation pipeline to enable automatic Japanese→English m
 - [x] API key management with localStorage persistence
 
 ### ❌ Missing Features
-- [ ] Segmentation mask storage
+- [x] Segmentation mask storage
 - [ ] Inpainting UI
 - [ ] Text rendering on inpainted image
 - [ ] Manual translation editing
@@ -65,51 +65,17 @@ Complete the manga translation pipeline to enable automatic Japanese→English m
 **Time estimate**: 3-4 hours
 
 **Tasks**:
-1. [ ] Add `segmentationMask` to state
-   - Type: `ImageData | null`
-   - Stores 1024x1024 grayscale mask from detection
+1. [x] Add `segmentationMask` (raw `number[]`) and `segmentationMaskBitmap` (`ImageBitmap | null`) to state
 
-2. [ ] Update detection panel to store mask
-   ```typescript
-   // detection-panel.tsx
-   if (result?.segment) {
-     const maskImageData = createImageDataFromBuffer(result.segment, 1024, 1024)
-     setSegmentationMask(maskImageData)
-   }
-   ```
+2. [x] Update detection panel to cache the mask, build a resized preview bitmap, and expose a show/hide toggle
 
-3. [ ] Add helper function to convert mask
-   ```typescript
-   // utils/image.ts
-   export function createImageDataFromBuffer(
-     buffer: number[],
-     width: number,
-     height: number
-   ): ImageData {
-     const data = new Uint8ClampedArray(width * height * 4)
-     for (let i = 0; i < buffer.length; i++) {
-       data[i * 4] = buffer[i]     // R
-       data[i * 4 + 1] = buffer[i] // G
-       data[i * 4 + 2] = buffer[i] // B
-       data[i * 4 + 3] = 128       // Semi-transparent
-     }
-     return new ImageData(data, width, height)
-   }
-   ```
+3. [x] Add `createSegmentationMaskBitmap` helper to tint, resize, and recycle preview bitmaps safely
 
-4. [ ] Render mask on canvas
-   ```typescript
-   // canvas.tsx
-   <Layer>
-     {tool === 'segmentation' && segmentationMask && (
-       <Image image={createImageBitmapFromImageData(segmentationMask)} />
-     )}
-   </Layer>
-   ```
+4. [x] Render mask overlay in `canvas.tsx` with a semi-transparent layer that respects the toggle or segmentation tool
 
 5. [ ] Test segmentation view
    - Run detection
-   - Click segmentation tool
+5. [ ] Test segmentation view
    - Verify white overlay appears on text regions
 
 **Files to modify**:

@@ -6,6 +6,7 @@ import { Button, Slider, Text } from '@radix-ui/themes'
 import { invoke } from '@tauri-apps/api/core'
 import { useEditorStore } from '@/lib/state'
 import { analyzeTextAppearance } from '@/utils/appearance-analysis'
+import { createSegmentationMaskBitmap } from '@/utils/image'
 
 export default function DetectionPanel() {
   const {
@@ -13,6 +14,10 @@ export default function DetectionPanel() {
     textBlocks,
     setTextBlocks,
     setSegmentationMask,
+    setSegmentationMaskBitmap,
+    segmentationMaskBitmap,
+    showSegmentationMask,
+    setShowSegmentationMask,
     selectionSensitivity,
     setSelectionSensitivity,
   } = useEditorStore()
@@ -24,6 +29,7 @@ export default function DetectionPanel() {
     setLoading(true)
 
     try {
+      const hadMaskBitmap = Boolean(segmentationMaskBitmap)
       const result = await invoke<any>('detection', {
         image: image.buffer,
         confidenceThreshold: confidenceThreshold,
@@ -39,6 +45,24 @@ export default function DetectionPanel() {
         setSegmentationMask(result.segment)
         console.log('Segmentation mask stored:', result.segment.length, 'bytes')
 
+        if (image?.bitmap) {
+          try {
+            const maskBitmap = await createSegmentationMaskBitmap(result.segment, {
+              targetWidth: image.bitmap.width,
+              targetHeight: image.bitmap.height,
+              alpha: 160,
+            })
+            setSegmentationMaskBitmap(maskBitmap)
+
+            if (!hadMaskBitmap && !showSegmentationMask) {
+              setShowSegmentationMask(true)
+            }
+          } catch (maskError) {
+            console.error('Failed to prepare segmentation mask preview:', maskError)
+            setSegmentationMaskBitmap(null)
+          }
+        }
+
         // Run appearance analysis automatically
         if (blocks.length > 0 && image?.bitmap) {
           console.log('Running appearance analysis on', blocks.length, 'blocks...')
@@ -49,6 +73,10 @@ export default function DetectionPanel() {
           const duration = performance.now() - startTime
           console.log(`Appearance analysis completed in ${duration.toFixed(2)}ms`)
         }
+      } else {
+        setSegmentationMask(null)
+        setSegmentationMaskBitmap(null)
+        setShowSegmentationMask(false)
       }
 
       if (blocks.length > 0) {
@@ -115,6 +143,18 @@ export default function DetectionPanel() {
               value={[selectionSensitivity]}
               onValueChange={(value) => setSelectionSensitivity(value[0])}
             />
+          </div>
+          <div className='flex items-center justify-between'>
+            <span className='font-medium text-gray-800 dark:text-gray-100'>Show detection mask</span>
+            <Button
+              size='1'
+              variant={showSegmentationMask ? 'solid' : 'soft'}
+              color='indigo'
+              onClick={() => setShowSegmentationMask(!showSegmentationMask)}
+              disabled={!segmentationMaskBitmap}
+            >
+              {showSegmentationMask ? 'On' : 'Off'}
+            </Button>
           </div>
           <Text className='text-gray-700 dark:text-gray-300'>
             <strong>{textBlocks.length}</strong> text blocks detected

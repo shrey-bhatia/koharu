@@ -258,8 +258,10 @@ export const useEditorStore = create(
       deeplApiKey: loadDeeplApiKey(),
       ollamaModel: loadOllamaModel(),
       ollamaSystemPrompt: loadOllamaSystemPrompt(),
-      translationProvider: loadTranslationProvider(),
-      segmentationMask: null,
+  translationProvider: loadTranslationProvider(),
+  segmentationMask: null,
+  segmentationMaskBitmap: null,
+  showSegmentationMask: false,
       inpaintedImage: null,
       theme: loadTheme(),
       renderMethod: loadRenderMethod(),
@@ -292,7 +294,9 @@ export const useEditorStore = create(
       ollamaModel: string
       ollamaSystemPrompt: string
       translationProvider: 'google' | 'deepl-free' | 'deepl-pro' | 'ollama'
-      segmentationMask: number[] | null
+  segmentationMask: number[] | null
+  segmentationMaskBitmap: ImageBitmap | null
+  showSegmentationMask: boolean
       inpaintedImage: Image | null
       theme: 'light' | 'dark'
       renderMethod: 'rectangle' | 'lama' | 'newlama'
@@ -317,19 +321,31 @@ export const useEditorStore = create(
       isSidebarCollapsed: boolean
     },
     (set) => ({
-      setImage: (image: Image | null) => set({
-        image,
-        currentStage: 'original',
-        pipelineStages: {
-          original: null,
-          textless: null,
-          withRectangles: null,
-          final: null,
-        },
-        textBlocks: [],
-        segmentationMask: null,
-        inpaintedImage: null,
-        selectedBlockIndex: null,
+      setImage: (image: Image | null) => set((state) => {
+        if (state.segmentationMaskBitmap) {
+          try {
+            state.segmentationMaskBitmap.close()
+          } catch (error) {
+            console.warn('Failed to release segmentation mask bitmap:', error)
+          }
+        }
+
+        return {
+          image,
+          currentStage: 'original',
+          pipelineStages: {
+            original: null,
+            textless: null,
+            withRectangles: null,
+            final: null,
+          },
+          textBlocks: [],
+          segmentationMask: null,
+          segmentationMaskBitmap: null,
+          inpaintedImage: null,
+          selectedBlockIndex: null,
+          showSegmentationMask: false,
+        }
       }),
       setTool: (tool: string) => set({ tool }),
       setScale: (scale: number) => set({ scale }),
@@ -373,6 +389,18 @@ export const useEditorStore = create(
         set({ ollamaSystemPrompt: prompt })
       },
       setSegmentationMask: (mask: number[] | null) => set({ segmentationMask: mask }),
+      setSegmentationMaskBitmap: (bitmap: ImageBitmap | null) =>
+        set((state) => {
+          if (state.segmentationMaskBitmap && state.segmentationMaskBitmap !== bitmap) {
+            try {
+              state.segmentationMaskBitmap.close()
+            } catch (error) {
+              console.warn('Failed to release segmentation mask bitmap:', error)
+            }
+          }
+          return { segmentationMaskBitmap: bitmap }
+        }),
+      setShowSegmentationMask: (show: boolean) => set({ showSegmentationMask: show }),
       setInpaintedImage: (image: Image | null) => set({ inpaintedImage: image }),
       setTheme: (theme: 'light' | 'dark') => {
         if (typeof window !== 'undefined') {

@@ -22,6 +22,8 @@ function Canvas() {
     textBlocks,
     setTextBlocks,
     inpaintedImage,
+    segmentationMaskBitmap,
+    showSegmentationMask,
     selectedBlockIndex,
     setSelectedBlockIndex,
     currentStage,
@@ -113,6 +115,7 @@ function Canvas() {
 
   const baseImage = getBaseImage()
   const shouldShowOverlays = tool === 'render' && (currentStage === 'rectangles' || currentStage === 'final')
+  const shouldShowMaskOverlay = Boolean(segmentationMaskBitmap && (tool === 'segmentation' || showSegmentationMask))
 
   return (
     <>
@@ -138,6 +141,13 @@ function Canvas() {
               <Layer>
                 <Image image={baseImage} />
               </Layer>
+
+              {/* Layer 1.5: Segmentation overlay */}
+              {shouldShowMaskOverlay && (
+                <Layer listening={false} opacity={0.6}>
+                  <Image image={segmentationMaskBitmap || null} listening={false} />
+                </Layer>
+              )}
 
               {/* Layer 2: Rectangle fills (render mode, only for 'rectangles' and 'final' stages) */}
               {shouldShowOverlays && renderMethod === 'rectangle' && (
