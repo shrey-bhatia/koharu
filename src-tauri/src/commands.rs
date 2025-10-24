@@ -423,7 +423,7 @@ pub struct BBox {
 pub struct InpaintConfig {
     pub padding: i32,        // Context padding (15-100px)
     pub target_size: u32,    // Inference resolution (256/384/512/768/1024)
-    pub mask_threshold: u8,  // Binary threshold (20-50)
+    pub mask_threshold: u8,  // Binary threshold (0-50)
     pub mask_erosion: u32,   // Erosion radius (0-10px)
     pub mask_dilation: u32,  // Optional dilation before erosion (0-5px)
     pub feather_radius: u32, // Alpha compositing feather (used by frontend)

@@ -12,7 +12,7 @@ export interface InpaintingConfig {
   // Core quality parameters
   padding: number              // 15-100px, default: 50
   targetSize: number           // Locked to 512px (current LaMa model limit)
-  maskThreshold: number        // 20-50, default: 30
+  maskThreshold: number        // 0-50, default: 30
   maskErosion: number          // 0-10px, default: 3
   maskDilation: number         // 0-5px, default: 0
   featherRadius: number        // 0-15px, default: 5
@@ -456,10 +456,19 @@ export const useEditorStore = create(
           inpaintingPreset: preset,
         }),
       setInpaintingConfig: (config: Partial<InpaintingConfig>) =>
-        set((state) => ({
-          inpaintingConfig: { ...state.inpaintingConfig, ...config },
-          inpaintingPreset: 'custom', // Mark as custom when user tweaks
-        })),
+        set((state) => {
+          const nextConfig = { ...state.inpaintingConfig, ...config }
+
+          if (config.maskThreshold !== undefined) {
+            const clamped = Math.max(0, Math.min(255, Math.round(config.maskThreshold)))
+            nextConfig.maskThreshold = clamped
+          }
+
+          return {
+            inpaintingConfig: nextConfig,
+            inpaintingPreset: 'custom', // Mark as custom when user tweaks
+          }
+        }),
       setDefaultFont: (font: string) => {
         if (typeof window !== 'undefined') {
           localStorage.setItem('default_font', font)

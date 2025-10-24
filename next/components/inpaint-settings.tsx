@@ -124,7 +124,7 @@ export default function InpaintSettings() {
             <Slider
               value={[inpaintingConfig.maskThreshold]}
               onValueChange={([v]) => setInpaintingConfig({ maskThreshold: v })}
-              min={20}
+              min={0}
               max={50}
               step={1}
             />
