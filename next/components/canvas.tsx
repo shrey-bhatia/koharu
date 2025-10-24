@@ -22,6 +22,15 @@ type BlockPointerOptions = {
   suppressAutoDrag?: boolean
 }
 
+const hasStartDrag = (node: Konva.Node | null): node is Konva.Node & { startDrag: () => void } => {
+  if (!node) {
+    return false
+  }
+
+  const candidate = node as Konva.Node & { startDrag?: unknown }
+  return typeof candidate.startDrag === 'function'
+}
+
 const generateBlockId = (): string => {
   const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined
 
@@ -489,7 +498,7 @@ function Canvas() {
       }
 
       const potentialGroup = event.currentTarget as Konva.Node | null
-      const dragNode = potentialGroup && typeof (potentialGroup as any).startDrag === 'function'
+      const dragNode = hasStartDrag(potentialGroup)
         ? potentialGroup
         : (event.target as Konva.Node | null)
 
@@ -500,7 +509,7 @@ function Canvas() {
         options?.suppressAutoDrag || isTransformerChild
       )
 
-      if (shouldAutoDrag && dragNode && typeof (dragNode as any).startDrag === 'function') {
+      if (shouldAutoDrag && hasStartDrag(dragNode)) {
         const wasDraggable = dragNode.draggable()
         if (!wasDraggable) {
           dragNode.draggable(true)
@@ -534,13 +543,6 @@ function Canvas() {
     const s = stage.scaleX()
     const sp = stage.position()
     return { x: (p.x - sp.x) / s, y: (p.y - sp.y) / s }
-  }
-
-  // Convert world (image) coordinates to Stage/screen coordinates
-  const toScreen = (stage: Konva.Stage, p: { x: number; y: number }) => {
-    const s = stage.scaleX()
-    const sp = stage.position()
-    return { x: p.x * s + sp.x, y: p.y * s + sp.y }
   }
 
   // Handler for when a box is transformed (scaled/rotated/resized)
