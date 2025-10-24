@@ -66,8 +66,9 @@ function Canvas() {
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
   const stagePosRef = useRef(stagePos)
   const isBlockDraggingRef = useRef(false)
+  const stageDraggablePrevRef = useRef<boolean | null>(null)
   const [isZooming, setIsZooming] = useState(false)
-  const [stageLocked, setStageLocked] = useState(false)
+  const stageLockRef = useRef(false)
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 })
   const transformerRef = useRef<Konva.Transformer>(null)
   const safeScale = Math.max(scale, 0.001)
@@ -87,32 +88,17 @@ function Canvas() {
     return null
   }, [selectedBlockId, selectedBlockIndex])
 
-  const lockStage = useCallback(
-    (locked: boolean) => {
-      const stage = stageRef.current
-      if (!stage) {
-        setStageLocked(locked)
-        return
-      }
+  const lockStage = useCallback((locked: boolean) => {
+    stageLockRef.current = locked
 
-      if (locked) {
-        stage.stopDrag()
-        stage.draggable(false)
-      } else {
-        stage.draggable(true)
-      }
+    if (locked) {
+      stageRef.current?.stopDrag()
+    }
 
-      if (process.env.NODE_ENV !== 'production') {
-        console.info('stage.lock', {
-          locked,
-          draggable: stage.draggable(),
-        })
-      }
-
-      setStageLocked(locked)
-    },
-    []
-  )
+    if (process.env.NODE_ENV !== 'production') {
+      console.info('stage.lock', { locked })
+    }
+  }, [])
 
   // Performance monitoring
   const perfMonitor = useZoomPerformance(zoomMetricsEnabled)
@@ -264,6 +250,35 @@ function Canvas() {
     return () => setAddTextAreaHandler(null)
   }, [handleAddTextArea, setAddTextAreaHandler])
 
+  const clampStagePosition = useCallback(
+    ({ x, y, scale: scaleOverride }: { x: number; y: number; scale?: number }) => {
+      if (!image) {
+        return { x, y }
+      }
+
+      const useScale = scaleOverride ?? scale
+      const imgW = image.bitmap.width * useScale
+      const imgH = image.bitmap.height * useScale
+      const minX = containerSize.width - imgW
+      const minY = containerSize.height - imgH
+      const clampedX = Math.min(0, Math.max(minX, x))
+      const clampedY = Math.min(0, Math.max(minY, y))
+
+      return { x: clampedX, y: clampedY }
+    },
+    [containerSize.width, containerSize.height, image, scale]
+  )
+
+  useEffect(() => {
+    setStagePos((prev) => {
+      const clamped = clampStagePosition({ x: prev.x, y: prev.y })
+      if (stageRef.current && (clamped.x !== prev.x || clamped.y !== prev.y)) {
+        stageRef.current.position(clamped)
+      }
+      return clamped
+    })
+  }, [clampStagePosition])
+
   // Zoom with anchor point (viewport center for buttons/keyboard, pointer for wheel)
   const applyZoom = useCallback((targetScale: number, mode: 'button' | 'keyboard' | 'wheel' = 'button') => {
     if (!stageRef.current || !image) return
@@ -297,18 +312,15 @@ function Canvas() {
     }
 
     // Clamp position to keep image partially in view
-    const imgW = image.bitmap.width * clampedScale
-    const imgH = image.bitmap.height * clampedScale
-    const minX = containerSize.width - imgW
-    const minY = containerSize.height - imgH
-    const clampedPos = {
-      x: Math.min(0, Math.max(minX, newPos.x)),
-      y: Math.min(0, Math.max(minY, newPos.y)),
-    }
+    const clampedPos = clampStagePosition({
+      x: newPos.x,
+      y: newPos.y,
+      scale: clampedScale,
+    })
 
     setScale(clampedScale)
     setStagePos(clampedPos)
-  }, [image, containerSize, setScale])
+  }, [clampStagePosition, image, containerSize, setScale])
 
   // Mouse wheel zoom handler with pointer anchoring
   const handleWheel = useCallback((e: WheelEvent) => {
@@ -439,9 +451,22 @@ function Canvas() {
     (event: KonvaEventObject<Event>, block: TextBlock, index: number) => {
       lockStage(true)
       stageRef.current?.stopDrag()
+      if (stageRef.current) {
+        stageDraggablePrevRef.current = stageRef.current.draggable()
+        stageRef.current.draggable(false)
+      }
       isBlockDraggingRef.current = false
-      setSelectedBlockIndex(index)
-      setSelectedBlockId(block.id ?? null)
+
+      const blockIdOrNull = block.id ?? null
+      const alreadySelectedById = selectedBlockId === blockIdOrNull
+      const alreadySelectedByIndex = selectedBlockIndex === index
+
+      if (!alreadySelectedByIndex) {
+        setSelectedBlockIndex(index)
+      }
+      if (!alreadySelectedById) {
+        setSelectedBlockId(blockIdOrNull)
+      }
       event.cancelBubble = true
       if (process.env.NODE_ENV !== 'production') {
         console.info('block.pointer.down', {
@@ -453,15 +478,35 @@ function Canvas() {
       if (process.env.NODE_ENV !== 'production') {
         console.info('block.select', { id: block.id, index })
       }
+
+      const potentialGroup = event.currentTarget as Konva.Node | null
+      const dragNode = potentialGroup && typeof (potentialGroup as any).startDrag === 'function'
+        ? potentialGroup
+        : (event.target as Konva.Node | null)
+
+      if (dragNode && typeof (dragNode as any).startDrag === 'function') {
+        const wasDraggable = dragNode.draggable()
+        if (!wasDraggable) {
+          dragNode.draggable(true)
+        }
+        dragNode.startDrag()
+        if (!wasDraggable) {
+          dragNode.draggable(false)
+        }
+      }
     },
-    [lockStage, setSelectedBlockId, setSelectedBlockIndex]
+    [lockStage, selectedBlockId, selectedBlockIndex, setSelectedBlockId, setSelectedBlockIndex]
   )
 
   const handleBlockPointerUp = useCallback(
     (event: KonvaEventObject<Event>) => {
       if (!isBlockDraggingRef.current) {
         lockStage(false)
+        if (stageRef.current && stageDraggablePrevRef.current !== null) {
+          stageRef.current.draggable(stageDraggablePrevRef.current)
+        }
       }
+      stageDraggablePrevRef.current = null
       event.cancelBubble = true
     },
     [lockStage]
@@ -549,6 +594,21 @@ function Canvas() {
   const baseImage = getBaseImage()
   const shouldShowOverlays = tool === 'render' && (currentStage === 'rectangles' || currentStage === 'final')
   const shouldShowMaskOverlay = Boolean(segmentationMaskBitmap && (tool === 'segmentation' || showSegmentationMask))
+  const hasActiveSelection = activeSelectionKey != null
+  const allowStageDrag = Boolean(image) && (!isDetectionMode || !hasActiveSelection)
+
+  const stageDragBound = useCallback(
+    (pos: Konva.Vector2d) => {
+      if (!allowStageDrag || stageLockRef.current || isBlockDraggingRef.current) {
+        return stagePosRef.current
+      }
+
+      const clamped = clampStagePosition({ x: pos.x, y: pos.y })
+      stagePosRef.current = clamped
+      return clamped
+    },
+    [allowStageDrag, clampStagePosition]
+  )
 
   // Visibility guards for layers (only render active layers)
   const showDetectionLayer = isDetectionMode
@@ -558,16 +618,10 @@ function Canvas() {
   const showInpaintLayer = tool === 'inpaint' && inpaintedImage
 
   useEffect(() => {
-    if (!showDetectionLayer && stageLocked) {
+    if (!showDetectionLayer && stageLockRef.current) {
       lockStage(false)
     }
-  }, [showDetectionLayer, stageLocked, lockStage])
-
-  useEffect(() => {
-    const stage = stageRef.current
-    if (!stage) return
-    stage.draggable(!stageLocked)
-  }, [stageLocked])
+  }, [showDetectionLayer, lockStage])
 
   useEffect(() => {
     if (!isDetectionMode) {
@@ -592,7 +646,8 @@ function Canvas() {
               width={containerSize.width}
               height={containerSize.height}
               dragDistance={isTouchDevice ? 16 : 12}
-              draggable={!stageLocked}
+              draggable={allowStageDrag}
+              dragBoundFunc={stageDragBound}
               onClick={(event) => {
                 if (event.target === event.currentTarget) {
                   setSelectedBlockIndex(null)
@@ -608,26 +663,43 @@ function Canvas() {
                 }
               }}
               onDragStart={(event) => {
-                if (stageLocked) {
-                  event.target.stopDrag()
-                  lockStage(true)
+                const isStageSelf = event.target === event.currentTarget
+                if (!isStageSelf) {
+                  return
                 }
+
+                if (!allowStageDrag || stageLockRef.current || isBlockDraggingRef.current) {
+                  event.target.stopDrag()
+                  return
+                }
+
                 if (process.env.NODE_ENV !== 'production') {
                   const pointer = stageRef.current?.getPointerPosition()
                   console.info('stage.drag.start', {
-                    stageLocked,
-                    draggable: stageRef.current?.draggable(),
+                    stageLocked: stageLockRef.current,
+                    draggable: allowStageDrag && !stageLockRef.current,
                     pointer,
                   })
                 }
               }}
               onDragEnd={(e) => {
+                const isStageSelf = e.target === e.currentTarget
+                if (!isStageSelf) {
+                  return
+                }
+
                 if (process.env.NODE_ENV !== 'production') {
                   console.info('stage.drag.end', {
                     position: { x: e.target.x(), y: e.target.y() },
                   })
                 }
-                setStagePos({ x: e.target.x(), y: e.target.y() })
+
+                const finalPos = clampStagePosition({ x: e.target.x(), y: e.target.y() })
+                stagePosRef.current = finalPos
+                setStagePos(finalPos)
+                if (stageRef.current && (finalPos.x !== e.target.x() || finalPos.y !== e.target.y())) {
+                  stageRef.current.position(finalPos)
+                }
               }}
             >
               {/* Layer 1: Base image (respects pipeline stage) */}
@@ -780,6 +852,11 @@ function Canvas() {
                             }
                           )
                           isBlockDraggingRef.current = false
+                          if (stageRef.current && stageDraggablePrevRef.current !== null) {
+                            stageRef.current.draggable(stageDraggablePrevRef.current)
+                          }
+                          stageDraggablePrevRef.current = null
+                          lockStage(false)
                         }}
                         onTransformStart={(e) => {
                           handleBlockPointerDown(e, block, index)
@@ -792,6 +869,15 @@ function Canvas() {
                           lockStage(false)
                         }}
                       >
+                        <Rect
+                          // Nearly invisible fill ensures the entire box is draggable/selectable
+                          x={0}
+                          y={0}
+                          width={width}
+                          height={height}
+                          fill='black'
+                          opacity={0.001}
+                        />
                         <Rect
                           x={0}
                           y={0}
