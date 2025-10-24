@@ -4,11 +4,22 @@ use font_kit::source::SystemSource;
 use image::{DynamicImage, GenericImageView, GrayImage};
 use std::fs;
 use std::sync::Arc;
+use std::io::Cursor;
+use std::time::Instant;
 use reqwest;
 use serde::{Deserialize, Serialize};
 
 use crate::{AppState, error::CommandResult};
 use crate::text_renderer::{render_text_on_image, TextBlock};
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectionResult {
+    pub bboxes: Vec<comic_text_detector::ClassifiedBbox>,
+    pub mask_png: Vec<u8>,
+    pub mask_width: u32,
+    pub mask_height: u32,
+}
 
 #[tauri::command]
 pub async fn detection(
@@ -16,19 +27,64 @@ pub async fn detection(
     image: Vec<u8>,
     confidence_threshold: f32,
     nms_threshold: f32,
-) -> CommandResult<comic_text_detector::Output> {
+) -> CommandResult<DetectionResult> {
     let state = app.state::<AppState>();
 
+    let total_start = Instant::now();
+    let decode_start = Instant::now();
     let img = image::load_from_memory(&image).context("Failed to load image")?;
+    let decode_elapsed = decode_start.elapsed();
+    tracing::info!(
+        "[detection] image decode took {}ms",
+        decode_elapsed.as_millis()
+    );
 
-    let result = state
+    let inference_start = Instant::now();
+    let output = state
         .comic_text_detector
         .lock()
         .await
         .inference(&img, confidence_threshold, nms_threshold)
         .context("Failed to perform inference")?;
+    let inference_elapsed = inference_start.elapsed();
+    tracing::info!(
+        "[detection] model inference took {}ms",
+        inference_elapsed.as_millis()
+    );
 
-    Ok(result)
+    let comic_text_detector::Output {
+        bboxes,
+        segment,
+        mask_width,
+        mask_height,
+    } = output;
+
+    let encode_start = Instant::now();
+    let mask_image = image::GrayImage::from_vec(mask_width, mask_height, segment)
+        .context("Failed to reconstruct segmentation mask")?;
+    let mut mask_dynamic = image::DynamicImage::ImageLuma8(mask_image);
+    let mut mask_png = Vec::new();
+    mask_dynamic
+        .write_to(&mut Cursor::new(&mut mask_png), image::ImageFormat::Png)
+        .context("Failed to encode segmentation mask as PNG")?;
+    let encode_elapsed = encode_start.elapsed();
+    tracing::info!(
+        "[detection] mask PNG encode took {}ms ({} bytes)",
+        encode_elapsed.as_millis(),
+        mask_png.len()
+    );
+
+    tracing::info!(
+        "[detection] total command time {}ms",
+        total_start.elapsed().as_millis()
+    );
+
+    Ok(DetectionResult {
+        bboxes,
+        mask_png,
+        mask_width,
+        mask_height,
+    })
 }
 
 #[tauri::command]

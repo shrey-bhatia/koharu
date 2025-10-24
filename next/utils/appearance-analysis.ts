@@ -14,7 +14,7 @@ const MASK_SIZE = 1024 // Segmentation mask is always 1024x1024
  */
 export async function analyzeTextAppearance(
   image: ImageBitmap,
-  mask: number[], // 1024x1024 grayscale segmentation mask
+  mask: Uint8Array, // 1024x1024 grayscale segmentation mask
   textBlocks: TextBlock[]
 ): Promise<TextBlock[]> {
   return Promise.all(
@@ -41,7 +41,7 @@ export async function analyzeTextAppearance(
  */
 async function analyzeBlock(
   image: ImageBitmap,
-  mask: number[],
+  mask: Uint8Array,
   block: TextBlock
 ): Promise<AppearanceMetadata> {
   // Extract local mask region for this block
@@ -77,7 +77,7 @@ async function analyzeBlock(
  * Extract mask region for a text block and resize to match block dimensions
  */
 function extractLocalMask(
-  fullMask: number[],
+  fullMask: Uint8Array,
   block: TextBlock,
   imageWidth: number,
   imageHeight: number
@@ -519,7 +519,7 @@ function calculateColorVariance(samples: RGB[], mean: RGB): number {
  * Analyze mask geometry using PCA
  */
 async function analyzeMaskGeometry(
-  mask: number[],
+  mask: Uint8Array,
   block: TextBlock,
   imageWidth: number,
   imageHeight: number

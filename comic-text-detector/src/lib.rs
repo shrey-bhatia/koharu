@@ -15,6 +15,8 @@ pub struct ComicTextDetector {
 pub struct Output {
     pub bboxes: Vec<ClassifiedBbox>,
     pub segment: Vec<u8>,
+    pub mask_width: u32,
+    pub mask_height: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -141,8 +143,15 @@ impl ComicTextDetector {
         );
         let segment =
             imageproc::morphology::erode(&segment, imageproc::distance_transform::Norm::L2, 1);
+        let mask_width = segment.width();
+        let mask_height = segment.height();
         let segment = segment.into_raw();
 
-        Ok(Output { bboxes, segment })
+        Ok(Output {
+            bboxes,
+            segment,
+            mask_width,
+            mask_height,
+        })
     }
 }

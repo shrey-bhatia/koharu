@@ -7,7 +7,7 @@ _Last reviewed: 2025-10-24_
 ### 1.1 Frontend Entry Point
 - **Initiator**: `next/components/detection-panel.tsx` defines the `run` handler attached to the Detect button (lines ~22-115). `page.tsx` mounts this panel whenever the user selects the Detection tool.
 - **User actions**: Manual click on the Play (`<Button onClick={run}>`) in DetectionPanel. There is no auto-detect on image load or threshold change—users must re-click after adjusting sliders.
-- **Pre-flight checks**: The handler does **not** guard for missing `image`. If `run` executes before an image is loaded, `image.buffer` resolves to `undefined`, producing a backend decode failure. No “already running” flag beyond the local `loading` state.
+- **Pre-flight checks**: The handler now guards against missing `image` and bails early with a console warning, preventing wasted IPC when no page is loaded. No “already running” flag beyond the local `loading` state.
 - **Status feedback**: Radix `Button` uses `loading={loading}`; sliders remain interactive. There is no progress bar or stage indicator. Console logs provide developer-oriented messages (`Detection result`, appearance-analysis duration).
 
 ### 1.2 Image Preparation
@@ -33,8 +33,8 @@ _Last reviewed: 2025-10-24_
 - **Redundancy**: Mask is generated once per inference. Backend does not repurpose existing computations; each detection triggers full pipeline.
 
 ### 1.5 Result Transport
-- **Response**: JSON-serialized struct via Tauri. `bboxes` becomes an array of objects (~40–60 bytes each). `segment` ships as `number[]` with 1 048 576 entries (~8 MB payload once JSON-encoded—`[0,255,…]`).
-- **Serialization**: Tauri serializes `Vec<u8>` as integer array, doubling size compared to binary transfer. For a 1024² mask this is the dominant cost.
+- **Response**: JSON-serialized struct via Tauri. `bboxes` becomes an array of objects (~40–60 bytes each). The segmentation mask now returns as PNG bytes (`maskPng`) plus explicit dimensions, cutting payload size to ~0.2–1 MB depending on sparsity.
+- **Serialization**: PNG encoding avoids the 8 MB JSON array previously returned for the mask and drops IPC cost by ~5–10×. Frontend decodes the PNG into a `Uint8Array` for state and generates a tinted overlay from the same data.
 - **Round trips**: Single request/response per detection. No follow-up commands (appearance analysis occurs front-side).
 
 ### 1.6 Frontend State Update
@@ -103,6 +103,7 @@ _Last reviewed: 2025-10-24_
 
 ### Additional Observations
 - Detect button should guard against missing `image` to prevent needless backend errors. Simple early return with user feedback.
+- Backend logging now records decode, inference, and mask-encode timings to aid profiling (see `commands.rs::detection`).
 - Consider optional GPU timing instrumentation (e.g., `tracing::info!("detection inference took {}ms", start.elapsed().as_millis())`) to inform future optimizations.
 - If mask preview remains essential, reusing a single OffscreenCanvas in `createSegmentationMaskBitmap` or caching the pre-colored bitmap between toggles could save ~50–80 ms on large images, albeit lower ROI.
 
