@@ -1,9 +1,9 @@
-use serde::{Deserialize, Serialize};
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
-use std::fs;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 /// Model package structure with checksums for integrity verification
 #[derive(Debug, Serialize, Deserialize)]
@@ -64,8 +64,9 @@ impl ModelPackage {
         let config_path = model_dir.join("config.json");
         let config: ModelConfig = serde_json::from_reader(
             std::fs::File::open(&config_path)
-                .with_context(|| format!("Failed to open config at {:?}", config_path))?
-        ).with_context(|| format!("Failed to parse config at {:?}", config_path))?;
+                .with_context(|| format!("Failed to open config at {:?}", config_path))?,
+        )
+        .with_context(|| format!("Failed to parse config at {:?}", config_path))?;
 
         // Check for required files
         let det_path = model_dir.join("det.onnx");
@@ -88,8 +89,9 @@ impl ModelPackage {
         let checksums: HashMap<String, String> = if checksums_path.exists() {
             serde_json::from_reader(
                 std::fs::File::open(&checksums_path)
-                    .with_context(|| format!("Failed to open checksums at {:?}", checksums_path))?
-            ).with_context(|| format!("Failed to parse checksums at {:?}", checksums_path))?
+                    .with_context(|| format!("Failed to open checksums at {:?}", checksums_path))?,
+            )
+            .with_context(|| format!("Failed to parse checksums at {:?}", checksums_path))?
         } else {
             // Generate checksums if not present
             Self::generate_checksums(model_dir)?
@@ -135,7 +137,13 @@ impl ModelPackage {
     /// Generate SHA-256 checksums for all model files
     pub fn generate_checksums(model_dir: &Path) -> Result<HashMap<String, String>> {
         let mut checksums = HashMap::new();
-        let files = ["det.onnx", "rec.onnx", "cls.onnx", "dictionary.txt", "config.json"];
+        let files = [
+            "det.onnx",
+            "rec.onnx",
+            "cls.onnx",
+            "dictionary.txt",
+            "config.json",
+        ];
 
         for filename in &files {
             let filepath = model_dir.join(filename);
@@ -160,7 +168,9 @@ impl ModelPackage {
                 if &actual_hash != expected_hash {
                     return Err(anyhow::anyhow!(
                         "Checksum mismatch for {}: expected {}, got {}",
-                        filename, expected_hash, actual_hash
+                        filename,
+                        expected_hash,
+                        actual_hash
                     ));
                 }
             }

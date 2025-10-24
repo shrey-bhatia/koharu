@@ -1,10 +1,11 @@
 'use client'
 
 import type Konva from 'konva'
+import type { KonvaEventObject } from 'konva/lib/Node'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Circle,
-  Image,
+  Image as KonvaImage,
   Layer,
   Rect,
   Stage,
@@ -34,7 +35,7 @@ function Canvas() {
   const containerRef = useRef<HTMLDivElement>(null)
   const inpaintLayerRef = useRef<Konva.Layer>(null)
 
-  const [selected, setSelected] = useState<any>(null)
+  const [selected, setSelected] = useState<Konva.Node | null>(null)
   const [isTouchDevice, setIsTouchDevice] = useState(false)
   const transformerRef = useRef<Konva.Transformer>(null)
   const safeScale = Math.max(scale, 0.001)
@@ -57,10 +58,10 @@ function Canvas() {
   }, [])
 
   const handleSelectBlock = useCallback(
-    (event: any, index: number) => {
+    (event: KonvaEventObject<Event>, index: number) => {
       event.cancelBubble = true
       setSelectedBlockIndex(index)
-      setSelected(event.target)
+      setSelected(event.target as Konva.Node)
     },
     [setSelectedBlockIndex, setSelected]
   )
@@ -139,13 +140,13 @@ function Canvas() {
             >
               {/* Layer 1: Base image (respects pipeline stage) */}
               <Layer>
-                <Image image={baseImage} />
+                <KonvaImage image={baseImage} />
               </Layer>
 
               {/* Layer 1.5: Segmentation overlay */}
               {shouldShowMaskOverlay && (
                 <Layer listening={false} opacity={0.6}>
-                  <Image image={segmentationMaskBitmap || null} listening={false} />
+                  <KonvaImage image={segmentationMaskBitmap || null} listening={false} />
                 </Layer>
               )}
 
@@ -246,7 +247,7 @@ function Canvas() {
                           onTap={(e) => handleSelectBlock(e, index)}
                           onDragStart={(e) => {
                             setSelectedBlockIndex(index)
-                            setSelected(e.target)
+                            setSelected(e.target as Konva.Node)
                           }}
                           draggable={true}
                           onDragEnd={(e) => {
@@ -297,10 +298,10 @@ function Canvas() {
                   )}
                 </Layer>
               )}
-              <Layer>{tool === 'segmentation' && <Image image={null} />}</Layer>
+              <Layer>{tool === 'segmentation' && <KonvaImage image={null} />}</Layer>
               <Layer ref={inpaintLayerRef}>
                 {tool === 'inpaint' && inpaintedImage && (
-                  <Image image={inpaintedImage.bitmap} />
+                  <KonvaImage image={inpaintedImage.bitmap} />
                 )}
               </Layer>
             </Stage>

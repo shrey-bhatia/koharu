@@ -1,15 +1,15 @@
 // Text rendering module for Koharu
 // Handles image composition and text overlay for export
 
+use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
+use font_kit::family_name::FamilyName;
+use font_kit::properties::Properties;
+use font_kit::source::SystemSource;
+use glyph_brush_layout::{FontId, GlyphPositioner, Layout, SectionGeometry, SectionText};
 use image::{DynamicImage, Rgba, RgbaImage};
 use imageproc::drawing::{draw_filled_rect_mut, draw_text_mut};
 use imageproc::rect::Rect as IpRect;
-use ab_glyph::{FontArc, PxScale, Font, ScaleFont};
-use glyph_brush_layout::{Layout, SectionGeometry, SectionText, FontId, GlyphPositioner};
 use serde::Deserialize;
-use font_kit::source::SystemSource;
-use font_kit::family_name::FamilyName;
-use font_kit::properties::Properties;
 
 // Font stack for Unicode fallback support
 #[derive(Clone)]
@@ -26,7 +26,8 @@ impl FontStack {
         let mut names = Vec::new();
 
         // Parse font-family string (basic comma-separated parsing)
-        let font_names: Vec<&str> = font_family.split(',')
+        let font_names: Vec<&str> = font_family
+            .split(',')
             .map(|s| s.trim().trim_matches('"').trim_matches('\''))
             .collect();
 
@@ -47,19 +48,19 @@ impl FontStack {
         // Step 2: Add comprehensive Unicode symbol fonts
         // These are loaded in priority order for best Unicode coverage
         let symbol_fonts = [
-            "Segoe UI Symbol",           // Windows symbol font
-            "Segoe UI Emoji",            // Windows emoji font
-            "Apple Symbols",             // macOS symbol font
-            "Apple Color Emoji",         // macOS emoji font
-            "Noto Sans Symbols",         // Google symbol font
-            "Noto Sans Symbols 2",       // Google symbol font 2
-            "Noto Emoji",                // Google emoji font
-            "Noto Color Emoji",          // Google color emoji
-            "GoNotoCJKCore",             // Comprehensive Unicode coverage
-            "Symbola",                   // Unicode symbol font
-            "DejaVu Sans",               // Comprehensive Unicode coverage
-            "FreeSerif",                 // Serif with good Unicode
-            "FreeSans",                  // Sans with good Unicode
+            "Segoe UI Symbol",     // Windows symbol font
+            "Segoe UI Emoji",      // Windows emoji font
+            "Apple Symbols",       // macOS symbol font
+            "Apple Color Emoji",   // macOS emoji font
+            "Noto Sans Symbols",   // Google symbol font
+            "Noto Sans Symbols 2", // Google symbol font 2
+            "Noto Emoji",          // Google emoji font
+            "Noto Color Emoji",    // Google color emoji
+            "GoNotoCJKCore",       // Comprehensive Unicode coverage
+            "Symbola",             // Unicode symbol font
+            "DejaVu Sans",         // Comprehensive Unicode coverage
+            "FreeSerif",           // Serif with good Unicode
+            "FreeSans",            // Sans with good Unicode
         ];
 
         for symbol_font in &symbol_fonts {
@@ -91,23 +92,28 @@ impl FontStack {
 
                     // If GoNotoCJKCore failed, try NotoSans-Regular
                     let noto_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
-                    let font = FontArc::try_from_vec(noto_data.to_vec())
-                        .map_err(|e| anyhow::anyhow!("Failed to load emergency fallback font: {}", e))?;
+                    let font = FontArc::try_from_vec(noto_data.to_vec()).map_err(|e| {
+                        anyhow::anyhow!("Failed to load emergency fallback font: {}", e)
+                    })?;
                     fonts.push(font);
                     names.push("Noto Sans (emergency)".to_string());
                 }
             }
         }
 
-        tracing::info!("[FONT] FontStack created with {} fonts: {:?}", fonts.len(), names);
+        tracing::info!(
+            "[FONT] FontStack created with {} fonts: {:?}",
+            fonts.len(),
+            names
+        );
         Ok(FontStack { fonts, names })
     }
-    
+
     /// Get the primary font
     pub fn primary(&self) -> &FontArc {
         &self.fonts[0]
     }
-    
+
     /// Find the best font for a character (with fallback)
     /// Returns the font and its index in the stack
     pub fn font_for_char(&self, c: char) -> (&FontArc, usize) {
@@ -115,17 +121,26 @@ impl FontStack {
             let glyph_id = font.glyph_id(c);
             // Check if we can get an outline for this glyph (indicates it exists)
             if font.outline(glyph_id).is_some() {
-                tracing::trace!("[FONT] Found char '{}' (U+{:04X}) in font {}: {}",
-                    c, c as u32, i, self.names.get(i).unwrap_or(&"unknown".to_string()));
+                tracing::trace!(
+                    "[FONT] Found char '{}' (U+{:04X}) in font {}: {}",
+                    c,
+                    c as u32,
+                    i,
+                    self.names.get(i).unwrap_or(&"unknown".to_string())
+                );
                 return (font, i);
             }
         }
         // Fallback to primary font if no font has the character
-        tracing::trace!("[FONT] Char '{}' (U+{:04X}) not found in any font, using primary: {}",
-            c, c as u32, self.names.get(0).unwrap_or(&"unknown".to_string()));
+        tracing::trace!(
+            "[FONT] Char '{}' (U+{:04X}) not found in any font, using primary: {}",
+            c,
+            c as u32,
+            self.names.get(0).unwrap_or(&"unknown".to_string())
+        );
         (&self.fonts[0], 0)
     }
-    
+
     /// Get all fonts (for glyph_brush_layout)
     pub fn all_fonts(&self) -> &[FontArc] {
         &self.fonts
@@ -173,19 +188,21 @@ pub struct AppearanceData {
 /// Load a font by family name from system fonts, with fallback to embedded font
 fn load_font_by_family(family_name: &str) -> anyhow::Result<FontArc> {
     let source = SystemSource::new();
-    
+
     // Try to find the font family using select_best_match
     let family = FamilyName::Title(family_name.to_string());
     let properties = Properties::new();
-    
+
     match source.select_best_match(&[family], &properties) {
         Ok(handle) => {
             // Load the font data
             let font_data = handle.load()?;
-            let font_bytes = font_data.copy_font_data()
+            let font_bytes = font_data
+                .copy_font_data()
                 .ok_or_else(|| anyhow::anyhow!("Failed to copy font data"))?;
-            let font = FontArc::try_from_vec((*font_bytes).clone())
-                .map_err(|e| anyhow::anyhow!("Failed to load system font '{}': {}", family_name, e))?;
+            let font = FontArc::try_from_vec((*font_bytes).clone()).map_err(|e| {
+                anyhow::anyhow!("Failed to load system font '{}': {}", family_name, e)
+            })?;
             tracing::debug!("[FONT] Loaded system font: {}", family_name);
             Ok(font)
         }
@@ -194,14 +211,17 @@ fn load_font_by_family(family_name: &str) -> anyhow::Result<FontArc> {
             let font_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
             let font = FontArc::try_from_vec(font_data.to_vec())
                 .map_err(|e| anyhow::anyhow!("Failed to load fallback font: {}", e))?;
-            tracing::warn!("[FONT] Font '{}' not found, using fallback Noto Sans", family_name);
+            tracing::warn!(
+                "[FONT] Font '{}' not found, using fallback Noto Sans",
+                family_name
+            );
             Ok(font)
         }
     }
 }
 
 /// Render text on image following the exact same logic as JavaScript export
-/// 
+///
 /// Image routing:
 /// - rectangle mode: base_image should be textless or original
 /// - lama/newlama modes: base_image should be inpainted
@@ -225,7 +245,9 @@ pub fn render_text_on_image(
                 continue;
             }
 
-            let bg_color = block.manual_bg_color.as_ref()
+            let bg_color = block
+                .manual_bg_color
+                .as_ref()
                 .or(block.background_color.as_ref())
                 .unwrap();
 
@@ -249,9 +271,13 @@ pub fn render_text_on_image(
     // Debug: Log what we're receiving
     tracing::info!("[DEBUG] Received {} text blocks", text_blocks.len());
     for (i, block) in text_blocks.iter().enumerate() {
-        tracing::info!("[DEBUG] Block {}: translated_text='{}', font_size={:?}, text_color={:?}",
+        tracing::info!(
+            "[DEBUG] Block {}: translated_text='{}', font_size={:?}, text_color={:?}",
             i,
-            block.translated_text.as_ref().unwrap_or(&"NULL".to_string()),
+            block
+                .translated_text
+                .as_ref()
+                .unwrap_or(&"NULL".to_string()),
             block.font_size,
             block.text_color
         );
@@ -259,7 +285,9 @@ pub fn render_text_on_image(
 
     // Use first text block if available, otherwise use fallback
     let debug_text = if let Some(first_block) = text_blocks.first() {
-        first_block.translated_text.as_ref()
+        first_block
+            .translated_text
+            .as_ref()
             .map(|s| s.as_str())
             .unwrap_or("NO_TRANSLATED_TEXT")
     } else {
@@ -288,16 +316,24 @@ pub fn render_text_on_image(
     */
 
     // Step 3: Draw translated text (original logic)
-    tracing::info!("[RUST_EXPORT] Drawing text for {} blocks", text_blocks.len());
+    tracing::info!(
+        "[RUST_EXPORT] Drawing text for {} blocks",
+        text_blocks.len()
+    );
 
     for (i, block) in text_blocks.iter().enumerate() {
         // Skip blocks without required properties (same as JS logic)
         if block.translated_text.is_none() || block.font_size.is_none() {
-            tracing::debug!("[RUST_EXPORT] Skipping block {}: missing text or fontSize", i);
+            tracing::debug!(
+                "[RUST_EXPORT] Skipping block {}: missing text or fontSize",
+                i
+            );
             continue;
         }
 
-        let text_color_opt = block.manual_text_color.as_ref()
+        let text_color_opt = block
+            .manual_text_color
+            .as_ref()
             .or(block.text_color.as_ref());
 
         if text_color_opt.is_none() {
@@ -308,7 +344,9 @@ pub fn render_text_on_image(
         let translated_text = block.translated_text.as_ref().unwrap();
         let font_size = block.font_size.unwrap();
         let text_color = text_color_opt.unwrap();
-        let font_family = block.font_family.as_ref()
+        let font_family = block
+            .font_family
+            .as_ref()
             .map(|s| s.as_str())
             .unwrap_or(default_font);
         let letter_spacing = block.letter_spacing.unwrap_or(0.0);
@@ -317,11 +355,18 @@ pub fn render_text_on_image(
         // Load the appropriate font stack for this text block
         let font_stack = FontStack::from_font_family(font_family)?;
 
-        tracing::debug!("[RUST_EXPORT] Drawing block {}: '{}' font={} size={}",
-            i, &translated_text[..translated_text.len().min(30)], font_family, font_size);
+        tracing::debug!(
+            "[RUST_EXPORT] Drawing block {}: '{}' font={} size={}",
+            i,
+            &translated_text[..translated_text.len().min(30)],
+            font_family,
+            font_size
+        );
 
         // Check for outline
-        let has_outline = block.appearance.as_ref()
+        let has_outline = block
+            .appearance
+            .as_ref()
             .and_then(|a| a.source_outline_color.as_ref().zip(a.outline_width_px))
             .is_some();
 
@@ -356,7 +401,7 @@ fn draw_rounded_rectangle(
     let width = width as u32;
     let height = height as u32;
     let radius = radius as u32;
-    
+
     // For now, draw simple rectangle
     // TODO: Implement proper rounded corners using Bézier curves
     let rect = IpRect::at(x, y).of_size(width, height);
@@ -378,27 +423,28 @@ fn draw_text_block(
 ) -> anyhow::Result<()> {
     let scale = PxScale::from(font_size);
     let text_rgba = Rgba([text_color.r, text_color.g, text_color.b, 255]);
-    
+
     let box_width = block.xmax - block.xmin;
     let box_height = block.ymax - block.ymin;
     let max_width = box_width * 0.9; // 10% padding
     let center_x = (block.xmin + block.xmax) / 2.0;
     let center_y = (block.ymin + block.ymax) / 2.0;
-    
+
     // Word wrap logic (matches JS)
     let words: Vec<&str> = text.split(' ').collect();
     let mut lines: Vec<String> = Vec::new();
     let mut current_line = String::new();
-    
+
     for word in words {
         let test_line = if current_line.is_empty() {
             word.to_string()
         } else {
             format!("{} {}", current_line, word)
         };
-        
-        let test_width = measure_text_width_mixed_fonts(&test_line, font_stack, scale, letter_spacing);
-        
+
+        let test_width =
+            measure_text_width_mixed_fonts(&test_line, font_stack, scale, letter_spacing);
+
         if test_width > max_width && !current_line.is_empty() {
             lines.push(current_line.clone());
             current_line = word.to_string();
@@ -409,34 +455,31 @@ fn draw_text_block(
     if !current_line.is_empty() {
         lines.push(current_line);
     }
-    
+
     // Calculate vertical positioning (matches JS)
     let line_height = font_size * line_height_multiplier;
     let total_height = lines.len() as f32 * line_height;
-    
+
     let start_y = if total_height > box_height * 0.9 {
         block.ymin + line_height / 2.0
     } else {
         center_y - ((lines.len() as f32 - 1.0) * line_height) / 2.0
     };
-    
+
     // Draw each line
     for (i, line) in lines.iter().enumerate() {
         let y = start_y + i as f32 * line_height;
-        
+
         // Draw outline first if present (matches JS order)
         if has_outline {
             if let Some(appearance) = &block.appearance {
-                if let (Some(outline_color), Some(outline_width)) = 
-                    (&appearance.source_outline_color, appearance.outline_width_px)
-                {
-                    let outline_rgba = Rgba([
-                        outline_color.r,
-                        outline_color.g,
-                        outline_color.b,
-                        255,
-                    ]);
-                    
+                if let (Some(outline_color), Some(outline_width)) = (
+                    &appearance.source_outline_color,
+                    appearance.outline_width_px,
+                ) {
+                    let outline_rgba =
+                        Rgba([outline_color.r, outline_color.g, outline_color.b, 255]);
+
                     if letter_spacing == 0.0 {
                         // Simple stroke - need character-by-character for mixed fonts
                         draw_text_with_mixed_fonts_and_outline(
@@ -466,7 +509,7 @@ fn draw_text_block(
                 }
             }
         }
-        
+
         // Draw fill on top (matches JS: fill after stroke)
         // Always use character-by-character rendering for proper Unicode font fallback
         draw_text_with_mixed_fonts(
@@ -480,7 +523,7 @@ fn draw_text_block(
             letter_spacing,
         );
     }
-    
+
     Ok(())
 }
 
@@ -489,26 +532,26 @@ fn measure_text_width(text: &str, font: &FontArc, scale: PxScale) -> f32 {
     if text.is_empty() {
         return 0.0;
     }
-    
+
     let layout = Layout::default_wrap();
     let fonts = &[font];
-    
+
     // Create a minimal section for measurement
     let section = SectionText {
         text,
         scale: scale.into(),
         font_id: FontId(0),
     };
-    
+
     let geometry = SectionGeometry::default();
     let glyphs = layout.calculate_glyphs(fonts, &geometry, &[section]);
-    
+
     // Find the rightmost glyph position + advance to get total width
     let mut max_x = 0.0;
     for section_glyph in glyphs {
         let scaled_font = font.as_scaled(scale);
-        let glyph_x = section_glyph.glyph.position.x + 
-                     scaled_font.h_advance(section_glyph.glyph.id);
+        let glyph_x =
+            section_glyph.glyph.position.x + scaled_font.h_advance(section_glyph.glyph.id);
         if glyph_x > max_x {
             max_x = glyph_x;
         }
@@ -517,10 +560,15 @@ fn measure_text_width(text: &str, font: &FontArc, scale: PxScale) -> f32 {
 }
 
 /// Measure text width with manual letter spacing (matches JS logic)
-fn measure_text_width_with_spacing(text: &str, font: &FontArc, scale: PxScale, spacing: f32) -> f32 {
+fn measure_text_width_with_spacing(
+    text: &str,
+    font: &FontArc,
+    scale: PxScale,
+    spacing: f32,
+) -> f32 {
     let mut total_width = 0.0;
     let chars: Vec<char> = text.chars().collect();
-    
+
     for (i, c) in chars.iter().enumerate() {
         let char_str = c.to_string();
         total_width += measure_text_width(&char_str, font, scale);
@@ -528,7 +576,7 @@ fn measure_text_width_with_spacing(text: &str, font: &FontArc, scale: PxScale, s
             total_width += spacing;
         }
     }
-    
+
     total_width
 }
 
@@ -545,12 +593,12 @@ fn draw_text_with_spacing(
 ) {
     let total_width = measure_text_width_mixed_fonts(text, font_stack, scale, letter_spacing);
     let mut current_x = center_x - total_width / 2.0;
-    
+
     for c in text.chars() {
         let char_str = c.to_string();
         let (font, _) = font_stack.font_for_char(c);
         let char_width = measure_text_width(&char_str, font, scale);
-        
+
         draw_text_mut(
             img,
             color,
@@ -560,7 +608,7 @@ fn draw_text_with_spacing(
             font,
             &char_str,
         );
-        
+
         current_x += char_width + letter_spacing;
     }
 }
@@ -578,11 +626,16 @@ fn draw_text_with_outline(
 ) {
     // Draw outline by offsetting in 8 directions
     let offsets = [
-        (-1, -1), (0, -1), (1, -1),
-        (-1,  0),          (1,  0),
-        (-1,  1), (0,  1), (1,  1),
+        (-1, -1),
+        (0, -1),
+        (1, -1),
+        (-1, 0),
+        (1, 0),
+        (-1, 1),
+        (0, 1),
+        (1, 1),
     ];
-    
+
     for (dx, dy) in offsets.iter() {
         draw_text_mut(
             img,
@@ -597,10 +650,15 @@ fn draw_text_with_outline(
 }
 
 /// Measure text width with mixed fonts and optional letter spacing
-fn measure_text_width_mixed_fonts(text: &str, font_stack: &FontStack, scale: PxScale, spacing: f32) -> f32 {
+fn measure_text_width_mixed_fonts(
+    text: &str,
+    font_stack: &FontStack,
+    scale: PxScale,
+    spacing: f32,
+) -> f32 {
     let mut total_width = 0.0;
     let chars: Vec<char> = text.chars().collect();
-    
+
     for (i, c) in chars.iter().enumerate() {
         let char_str = c.to_string();
         let (font, _) = font_stack.font_for_char(*c);
@@ -609,7 +667,7 @@ fn measure_text_width_mixed_fonts(text: &str, font_stack: &FontStack, scale: PxS
             total_width += spacing;
         }
     }
-    
+
     total_width
 }
 
@@ -626,12 +684,12 @@ fn draw_text_with_mixed_fonts(
 ) {
     let total_width = measure_text_width_mixed_fonts(text, font_stack, scale, letter_spacing);
     let mut current_x = center_x - total_width / 2.0;
-    
+
     for c in text.chars() {
         let char_str = c.to_string();
         let (font, _) = font_stack.font_for_char(c);
         let char_width = measure_text_width(&char_str, font, scale);
-        
+
         draw_text_mut(
             img,
             color,
@@ -641,7 +699,7 @@ fn draw_text_with_mixed_fonts(
             font,
             &char_str,
         );
-        
+
         current_x += char_width + letter_spacing;
     }
 }
@@ -659,12 +717,12 @@ fn draw_text_with_mixed_fonts_and_outline(
 ) {
     let total_width = measure_text_width_mixed_fonts(text, font_stack, scale, 0.0);
     let mut current_x = center_x - total_width / 2.0;
-    
+
     for c in text.chars() {
         let char_str = c.to_string();
         let (font, _) = font_stack.font_for_char(c);
         let char_width = measure_text_width(&char_str, font, scale);
-        
+
         draw_text_with_outline(
             img,
             current_x as i32,
@@ -675,7 +733,7 @@ fn draw_text_with_mixed_fonts_and_outline(
             outline_color,
             outline_width,
         );
-        
+
         current_x += char_width;
     }
 }
@@ -694,12 +752,12 @@ fn draw_text_with_spacing_and_outline(
 ) {
     let total_width = measure_text_width_mixed_fonts(text, font_stack, scale, letter_spacing);
     let mut current_x = center_x - total_width / 2.0;
-    
+
     for c in text.chars() {
         let char_str = c.to_string();
         let (font, _) = font_stack.font_for_char(c);
         let char_width = measure_text_width(&char_str, font, scale);
-        
+
         draw_text_with_outline(
             img,
             current_x as i32,
@@ -710,7 +768,7 @@ fn draw_text_with_spacing_and_outline(
             outline_color,
             outline_width,
         );
-        
+
         current_x += char_width + letter_spacing;
     }
 }
@@ -818,7 +876,10 @@ fn draw_unicode_debug_test(
                     // Final fallback to NotoSans
                     let noto_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
                     let fallback_font = FontArc::try_from_vec(noto_data.to_vec()).unwrap();
-                    let error_msg = format!("Stack Error: {}", e.to_string().chars().take(15).collect::<String>());
+                    let error_msg = format!(
+                        "Stack Error: {}",
+                        e.to_string().chars().take(15).collect::<String>()
+                    );
                     // draw_text_mut(img, yellow_color, 20, (img_height as i32) - 50, scale, &fallback_font, &error_msg);
                 }
             }
@@ -849,12 +910,16 @@ fn draw_debug_text_method1(
         if let Some(block) = text_block {
             let has_translated = block.translated_text.is_some();
             let text_len = block.translated_text.as_ref().map(|s| s.len()).unwrap_or(0);
-            let text_preview = block.translated_text.as_ref()
+            let text_preview = block
+                .translated_text
+                .as_ref()
                 .map(|s| s.chars().take(10).collect::<String>())
                 .unwrap_or("NONE".to_string());
             let raw_text = format!("{:?}", block.translated_text);
-            format!("BLOCKS:{} HAS:{} LEN:{} PREV:'{}' RAW:{}",
-                text_blocks_len, has_translated, text_len, text_preview, raw_text)
+            format!(
+                "BLOCKS:{} HAS:{} LEN:{} PREV:'{}' RAW:{}",
+                text_blocks_len, has_translated, text_len, text_preview, raw_text
+            )
         } else {
             format!("BLOCKS:{} BUT_NO_FIRST_BLOCK", text_blocks_len)
         }
@@ -885,8 +950,10 @@ fn draw_debug_text_method2(
         let has_bg = block.background_color.is_some();
         let font_size = block.font_size.unwrap_or(0.0);
         let raw_size = format!("{:?}", block.font_size);
-        format!("LEN:{} COLOR:{} BG:{} SIZE:{:.1} RAW_SIZE:{}",
-            text_len, has_color, has_bg, font_size, raw_size)
+        format!(
+            "LEN:{} COLOR:{} BG:{} SIZE:{:.1} RAW_SIZE:{}",
+            text_len, has_color, has_bg, font_size, raw_size
+        )
     } else {
         "NO_BLOCK_DATA".to_string()
     };
@@ -916,14 +983,22 @@ fn draw_debug_text_method3(
     // Show serialization check
     let display_text = if let Some(block) = text_block {
         let has_appearance = block.appearance.is_some();
-        let has_outline = block.appearance.as_ref()
-            .and_then(|a| a.source_outline_color.as_ref()).is_some();
-        let outline_width = block.appearance.as_ref()
-            .and_then(|a| a.outline_width_px).unwrap_or(0.0);
+        let has_outline = block
+            .appearance
+            .as_ref()
+            .and_then(|a| a.source_outline_color.as_ref())
+            .is_some();
+        let outline_width = block
+            .appearance
+            .as_ref()
+            .and_then(|a| a.outline_width_px)
+            .unwrap_or(0.0);
         let has_weight = block.font_weight.is_some();
         let has_stretch = block.font_stretch.is_some();
-        format!("APPEAR:{} OUTLINE:{} W:{:.0} WEIGHT:{} STRETCH:{}",
-            has_appearance, has_outline, outline_width, has_weight, has_stretch)
+        format!(
+            "APPEAR:{} OUTLINE:{} W:{:.0} WEIGHT:{} STRETCH:{}",
+            has_appearance, has_outline, outline_width, has_weight, has_stretch
+        )
     } else {
         "NO_BLOCK_DATA".to_string()
     };
@@ -960,9 +1035,14 @@ fn draw_debug_text_method4(
         let rust_support = "ab_glyph+imageproc";
         let has_line_height = block.line_height.is_some();
         let has_family = block.font_family.is_some();
-        let bbox = format!("{:.0}x{:.0}x{:.0}x{:.0}",
-            block.xmin, block.ymin, block.xmax, block.ymax);
-        format!("RUST:{} LH:{} FAM:{} BBOX:{}", rust_support, has_line_height, has_family, bbox)
+        let bbox = format!(
+            "{:.0}x{:.0}x{:.0}x{:.0}",
+            block.xmin, block.ymin, block.xmax, block.ymax
+        );
+        format!(
+            "RUST:{} LH:{} FAM:{} BBOX:{}",
+            rust_support, has_line_height, has_family, bbox
+        )
     } else {
         "NO_BLOCK_DATA".to_string()
     };
@@ -978,26 +1058,26 @@ fn draw_debug_text_method4(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_measure_text_width() {
         let font_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
         let font = FontArc::try_from_vec(font_data.to_vec()).unwrap();
         let scale = PxScale::from(16.0);
-        
+
         let width = measure_text_width("Hello", &font, scale);
         assert!(width > 0.0);
     }
-    
+
     #[test]
     fn test_measure_text_width_with_spacing() {
         let font_data = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
         let font = FontArc::try_from_vec(font_data.to_vec()).unwrap();
         let scale = PxScale::from(16.0);
-        
+
         let width_no_spacing = measure_text_width("Hello", &font, scale);
         let width_with_spacing = measure_text_width_with_spacing("Hello", &font, scale, 5.0);
-        
+
         assert!(width_with_spacing > width_no_spacing + 15.0);
     }
 }

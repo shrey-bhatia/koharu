@@ -1,9 +1,9 @@
-use crate::ocr_pipeline::{PaddleOcrPipeline, DeviceConfig};
-use crate::model_package::ModelPackage;
 use crate::accuracy::{AccuracyMetrics, BatchAccuracy};
+use crate::model_package::ModelPackage;
+use crate::ocr_pipeline::{DeviceConfig, PaddleOcrPipeline};
+use anyhow::Result;
 use image::{DynamicImage, RgbaImage};
 use std::path::Path;
-use anyhow::Result;
 
 /// Test fixture for vertical text OCR validation
 pub struct VerticalTextFixture {
@@ -74,14 +74,11 @@ impl VerticalTextTestSuite {
             fixtures: vec![
                 // Basic horizontal text
                 VerticalTextFixture::horizontal("Hello World", "Basic horizontal text"),
-
                 // Japanese vertical text (simulated)
                 VerticalTextFixture::vertical_90("こんにちは", "Japanese vertical text 90°"),
                 VerticalTextFixture::vertical_270("こんにちは", "Japanese vertical text 270°"),
-
                 // Upside-down text (requires angle classification)
                 VerticalTextFixture::upside_down("WORLD", "Upside-down text requiring cls"),
-
                 // Mixed content
                 VerticalTextFixture::horizontal("Name: 山田太郎", "Mixed Japanese horizontal"),
                 VerticalTextFixture::vertical_90("住所: 東京", "Japanese address vertical"),
@@ -119,7 +116,9 @@ impl VerticalTextTestSuite {
             // Run OCR on the fixture
             let regions = pipeline.detect_text(&fixture.image).await?;
             let recognized_text = if !regions.is_empty() {
-                pipeline.recognize_text(&fixture.image, &regions).await?
+                pipeline
+                    .recognize_text(&fixture.image, &regions)
+                    .await?
                     .into_iter()
                     .map(|r| r.text)
                     .collect::<Vec<_>>()
@@ -184,11 +183,20 @@ mod tests {
             Ok(results) => {
                 println!("CER with CLS: {:.3}", results.with_cls.accuracy.average_cer);
                 println!("WER with CLS: {:.3}", results.with_cls.accuracy.average_wer);
-                println!("CER without CLS: {:.3}", results.without_cls.accuracy.average_cer);
-                println!("WER without CLS: {:.3}", results.without_cls.accuracy.average_wer);
+                println!(
+                    "CER without CLS: {:.3}",
+                    results.without_cls.accuracy.average_cer
+                );
+                println!(
+                    "WER without CLS: {:.3}",
+                    results.without_cls.accuracy.average_wer
+                );
 
                 // CLS should improve accuracy on rotated text
-                assert!(results.with_cls.accuracy.average_cer <= results.without_cls.accuracy.average_cer);
+                assert!(
+                    results.with_cls.accuracy.average_cer
+                        <= results.without_cls.accuracy.average_cer
+                );
             }
             Err(e) => {
                 println!("Test skipped due to: {:?}", e);

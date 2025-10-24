@@ -1,7 +1,7 @@
 'use client'
 
-import { Select, Text, Badge } from '@radix-ui/themes'
-import { useEditorStore, RGB } from '@/lib/state'
+import { Text, Badge } from '@radix-ui/themes'
+import { useEditorStore } from '@/lib/state'
 import { rgbToHex, hexToRgb } from '@/utils/color-extraction'
 import { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
@@ -23,10 +23,9 @@ const FALLBACK_FONTS = [
 
 interface RenderCustomizationProps {
   blockIndex: number
-  onReProcess?: () => void
 }
 
-export default function RenderCustomization({ blockIndex, onReProcess }: RenderCustomizationProps) {
+export default function RenderCustomization({ blockIndex }: RenderCustomizationProps) {
   const { textBlocks, setTextBlocks } = useEditorStore()
   const block = textBlocks[blockIndex]
   const [systemFonts, setSystemFonts] = useState<string[]>(FALLBACK_FONTS)

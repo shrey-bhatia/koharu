@@ -2,23 +2,32 @@
 
 import { useState } from 'react'
 import { Play, AlertCircle, CheckCircle, X } from 'lucide-react'
-import { Button, Text, Callout, Progress } from '@radix-ui/themes'
+import { Button, Callout, Progress } from '@radix-ui/themes'
 import { invoke } from '@tauri-apps/api/core'
 import { useEditorStore } from '@/lib/state'
-import { imageBitmapToArrayBuffer, maskToArrayBuffer } from '@/utils/image'
+import { imageBitmapToArrayBuffer, maskToArrayBuffer, maskToUint8Array } from '@/utils/image'
 import { createImageFromBuffer } from '@/lib/image'
 import { compositeMaskedRegion } from '@/utils/alpha-compositing'
 
 interface InpaintedRegion {
   image: number[]
+  mask: number[]
   x: number
   y: number
   width: number
   height: number
+  maskWidth: number
+  maskHeight: number
+  paddedBbox: {
+    xmin: number
+    ymin: number
+    xmax: number
+    ymax: number
+  }
 }
 
 export default function InpaintPanel() {
-  const { image, segmentationMask, textBlocks, setInpaintedImage, renderMethod, setPipelineStage, setCurrentStage, inpaintingConfig } = useEditorStore()
+  const { image, segmentationMask, segmentationMaskWidth, segmentationMaskHeight, textBlocks, setInpaintedImage, renderMethod, setPipelineStage, setCurrentStage, inpaintingConfig } = useEditorStore()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -43,31 +52,23 @@ export default function InpaintPanel() {
     }
   }
 
-  const runFullInpainting = async () => {
-    setLoading(true)
-    setError(null)
-    setSuccess(false)
+  const resolveMaskMetadata = () => {
+    const maskData = maskToUint8Array(segmentationMask!)
 
-    try {
-      const imageBuffer = await imageBitmapToArrayBuffer(image!.bitmap)
-      const maskBuffer = await maskToArrayBuffer(segmentationMask!)
+    let maskWidth = segmentationMaskWidth ?? Math.round(Math.sqrt(maskData.length))
+    let maskHeight = segmentationMaskHeight ?? Math.round(maskData.length / Math.max(maskWidth, 1))
 
-      const result = await invoke<number[]>('inpaint', {
-        image: Array.from(new Uint8Array(imageBuffer)),
-        mask: Array.from(new Uint8Array(maskBuffer)),
-      })
-
-      const resultBuffer = new Uint8Array(result).buffer
-      const inpainted = await createImageFromBuffer(resultBuffer)
-      setInpaintedImage(inpainted)
-      setPipelineStage('textless', inpainted)
-      setCurrentStage('textless')
-      setSuccess(true)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Inpainting failed')
-    } finally {
-      setLoading(false)
+    if (!maskWidth || !maskHeight || maskWidth * maskHeight !== maskData.length) {
+      const perfectSquare = Math.round(Math.sqrt(maskData.length))
+      if (perfectSquare * perfectSquare === maskData.length) {
+        maskWidth = perfectSquare
+        maskHeight = perfectSquare
+      } else {
+        throw new Error('Segmentation mask dimensions are inconsistent with stored data. Please rerun detection.')
+      }
     }
+
+    return { maskData, maskWidth, maskHeight }
   }
 
   const runLocalizedInpainting = async () => {
@@ -77,16 +78,30 @@ export default function InpaintPanel() {
     setProgress(0)
     setCancelled(false)
 
-    try {
-      const imageBuffer = await imageBitmapToArrayBuffer(image!.bitmap)
-      const maskBuffer = await maskToArrayBuffer(segmentationMask!)
+    let cachePrimed = false
 
-      // Create canvas at original resolution
-      const canvas = new OffscreenCanvas(image!.bitmap.width, image!.bitmap.height)
-      const ctx = canvas.getContext('2d')!
+    try {
+      const imageWidth = image!.bitmap.width
+      const imageHeight = image!.bitmap.height
+
+      const { maskData, maskWidth, maskHeight } = resolveMaskMetadata()
+
+      const imagePng = await imageBitmapToArrayBuffer(image!.bitmap)
+      const maskPng = await maskToArrayBuffer(maskData, maskWidth, maskHeight)
+
+      await invoke('cache_inpainting_data', {
+        imagePng: Array.from(new Uint8Array(imagePng)),
+        maskPng: Array.from(new Uint8Array(maskPng)),
+      })
+      cachePrimed = true
+
+      const canvas = new OffscreenCanvas(imageWidth, imageHeight)
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })
+      if (!ctx) {
+        throw new Error('Failed to acquire inpainting compositing context')
+      }
       ctx.drawImage(image!.bitmap, 0, 0)
 
-      // Process each text block
       for (let i = 0; i < textBlocks.length; i++) {
         if (cancelled) break
 
@@ -97,9 +112,7 @@ export default function InpaintPanel() {
         const blockHeight = block.ymax - block.ymin
         if (blockWidth < 20 || blockHeight < 20) continue
 
-        const result = await invoke<InpaintedRegion>('inpaint_region', {
-          image: Array.from(new Uint8Array(imageBuffer)),
-          mask: Array.from(new Uint8Array(maskBuffer)),
+        const result = await invoke<InpaintedRegion>('inpaint_region_cached', {
           bbox: {
             xmin: block.xmin,
             ymin: block.ymin,
@@ -117,11 +130,34 @@ export default function InpaintPanel() {
           },
         })
 
-        const blob = new Blob([new Uint8Array(result.image)])
-        const bitmap = await createImageBitmap(blob)
+        const expectedPixels = result.width * result.height * 4
+        const pixelData = Uint8ClampedArray.from(result.image)
 
-        // Simple composite (feathering implemented later)
-        ctx.drawImage(bitmap, result.x, result.y)
+        console.debug('Inpaint block received', {
+          index: i,
+          width: result.width,
+          height: result.height,
+          expectedBytes: expectedPixels,
+          actualBytes: pixelData.length,
+          ratio: expectedPixels ? (pixelData.length / expectedPixels).toFixed(3) : 'n/a',
+          firstBytes: Array.from(pixelData.slice(0, 16)),
+        })
+
+        if (pixelData.length !== expectedPixels) {
+          console.warn('Unexpected inpainted crop size. Falling back to direct drawImage via blob.', {
+            expected: expectedPixels,
+            actual: pixelData.length,
+          })
+          const fallbackBlob = new Blob([new Uint8Array(result.image)])
+          const fallbackBitmap = await createImageBitmap(fallbackBlob)
+          ctx.drawImage(fallbackBitmap, result.x, result.y)
+          fallbackBitmap.close?.()
+        } else {
+          const imageData = new ImageData(pixelData, result.width, result.height)
+          const bitmap = await createImageBitmap(imageData)
+          ctx.drawImage(bitmap, result.x, result.y)
+          bitmap.close?.()
+        }
 
         setProgress((i + 1) / textBlocks.length)
       }
@@ -134,10 +170,19 @@ export default function InpaintPanel() {
       setCurrentStage('textless')
       setSuccess(true)
     } catch (err) {
+      console.error('Localized LaMa invoke failed', err)
       setError(err instanceof Error ? err.message : 'Localized inpainting failed')
     } finally {
+      if (cachePrimed) {
+        try {
+          await invoke('clear_inpainting_cache')
+        } catch (cacheError) {
+          console.warn('Failed to clear inpainting cache', cacheError)
+        }
+      }
       setLoading(false)
       setCurrentBlock(0)
+      setCancelled(false)
     }
   }
 
@@ -148,16 +193,30 @@ export default function InpaintPanel() {
     setProgress(0)
     setCancelled(false)
 
-    try {
-      const imageBuffer = await imageBitmapToArrayBuffer(image!.bitmap)
-      const maskBuffer = await maskToArrayBuffer(segmentationMask!)
+    let cachePrimed = false
 
-      // Create canvas at original resolution
-      const canvas = new OffscreenCanvas(image!.bitmap.width, image!.bitmap.height)
-      const ctx = canvas.getContext('2d')!
+    try {
+      const imageWidth = image!.bitmap.width
+      const imageHeight = image!.bitmap.height
+
+      const { maskData, maskWidth, maskHeight } = resolveMaskMetadata()
+
+      const imagePng = await imageBitmapToArrayBuffer(image!.bitmap)
+      const maskPng = await maskToArrayBuffer(maskData, maskWidth, maskHeight)
+
+      await invoke('cache_inpainting_data', {
+        imagePng: Array.from(new Uint8Array(imagePng)),
+        maskPng: Array.from(new Uint8Array(maskPng)),
+      })
+      cachePrimed = true
+
+      const canvas = new OffscreenCanvas(imageWidth, imageHeight)
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })
+      if (!ctx) {
+        throw new Error('Failed to acquire inpainting compositing context')
+      }
       ctx.drawImage(image!.bitmap, 0, 0)
 
-      // Process each text block with mask-based compositing
       for (let i = 0; i < textBlocks.length; i++) {
         if (cancelled) break
 
@@ -168,9 +227,7 @@ export default function InpaintPanel() {
         const blockHeight = block.ymax - block.ymin
         if (blockWidth < 20 || blockHeight < 20) continue
 
-        const result = await invoke<InpaintedRegion>('inpaint_region', {
-          image: Array.from(new Uint8Array(imageBuffer)),
-          mask: Array.from(new Uint8Array(maskBuffer)),
+        const result = await invoke<InpaintedRegion>('inpaint_region_cached', {
           bbox: {
             xmin: block.xmin,
             ymin: block.ymin,
@@ -188,27 +245,81 @@ export default function InpaintPanel() {
           },
         })
 
-        const blob = new Blob([new Uint8Array(result.image)])
-        const bitmap = await createImageBitmap(blob)
+        const expectedPixels = result.width * result.height * 4
+        const pixelData = Uint8ClampedArray.from(result.image)
 
-        // *** CRITICAL: Alpha-blended compositing with feathering ***
-        await compositeMaskedRegion(
-          ctx,
-          bitmap,
-          result.x,
-          result.y,
-          result.width,
-          result.height,
-          block,
-          segmentationMask!,
-          image!.bitmap.width,
-          image!.bitmap.height,
-          {
-            featherRadius: inpaintingConfig.featherRadius,
-            autoSeamFix: inpaintingConfig.autoSeamFix,
-            seamThreshold: inpaintingConfig.seamThreshold,
-          }
-        )
+        console.debug('NewLaMa inpaint block received', {
+          index: i,
+          width: result.width,
+          height: result.height,
+          expectedBytes: expectedPixels,
+          actualBytes: pixelData.length,
+          ratio: expectedPixels ? (pixelData.length / expectedPixels).toFixed(3) : 'n/a',
+          firstBytes: Array.from(pixelData.slice(0, 16)),
+        })
+
+        if (pixelData.length !== expectedPixels) {
+          console.warn('Unexpected inpainted crop size. Attempting blob fallback for mask composite.', {
+            expected: expectedPixels,
+            actual: pixelData.length,
+          })
+
+          const fallbackBlob = new Blob([new Uint8Array(result.image)])
+          const fallbackBitmap = await createImageBitmap(fallbackBlob)
+          const resultMask = Uint8Array.from(result.mask)
+
+          await compositeMaskedRegion(
+            ctx,
+            fallbackBitmap,
+            result.x,
+            result.y,
+            result.width,
+            result.height,
+            block,
+            maskData,
+            maskWidth,
+            maskHeight,
+            imageWidth,
+            imageHeight,
+            result.paddedBbox,
+            {
+              featherRadius: inpaintingConfig.featherRadius,
+              autoSeamFix: inpaintingConfig.autoSeamFix,
+              seamThreshold: inpaintingConfig.seamThreshold,
+              precomputedMask: resultMask,
+            }
+          )
+
+          fallbackBitmap.close?.()
+        } else {
+          const imageData = new ImageData(pixelData, result.width, result.height)
+          const bitmap = await createImageBitmap(imageData)
+          const resultMask = Uint8Array.from(result.mask)
+
+          await compositeMaskedRegion(
+            ctx,
+            bitmap,
+            result.x,
+            result.y,
+            result.width,
+            result.height,
+            block,
+            maskData,
+            maskWidth,
+            maskHeight,
+            imageWidth,
+            imageHeight,
+            result.paddedBbox,
+            {
+              featherRadius: inpaintingConfig.featherRadius,
+              autoSeamFix: inpaintingConfig.autoSeamFix,
+              seamThreshold: inpaintingConfig.seamThreshold,
+              precomputedMask: resultMask,
+            }
+          )
+
+          bitmap.close?.()
+        }
 
         setProgress((i + 1) / textBlocks.length)
       }
@@ -221,10 +332,19 @@ export default function InpaintPanel() {
       setCurrentStage('textless')
       setSuccess(true)
     } catch (err) {
+      console.error('NewLaMa invoke failed', err)
       setError(err instanceof Error ? err.message : 'NewLaMa inpainting failed')
     } finally {
+      if (cachePrimed) {
+        try {
+          await invoke('clear_inpainting_cache')
+        } catch (cacheError) {
+          console.warn('Failed to clear inpainting cache', cacheError)
+        }
+      }
       setLoading(false)
       setCurrentBlock(0)
+      setCancelled(false)
     }
   }
 
@@ -252,7 +372,7 @@ export default function InpaintPanel() {
               <AlertCircle className='h-4 w-4' />
             </Callout.Icon>
             <Callout.Text>
-              Rectangle fill doesn't require AI inpainting. Colors will be extracted during Render.
+              Rectangle fill doesn&apos;t require AI inpainting. Colors will be extracted during Render.
             </Callout.Text>
           </Callout.Root>
         </div>
@@ -312,7 +432,7 @@ export default function InpaintPanel() {
               <CheckCircle className='h-4 w-4' />
             </Callout.Icon>
             <Callout.Text>
-              Text removed successfully! Click "Inpaint" tool to view result.
+              Text removed successfully! Click &quot;Inpaint&quot; tool to view result.
             </Callout.Text>
           </Callout.Root>
         )}

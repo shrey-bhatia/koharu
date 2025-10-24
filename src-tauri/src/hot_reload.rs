@@ -1,11 +1,11 @@
 use anyhow::Result;
+use futures::future::FutureExt;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::time::{timeout, Duration};
-use futures::future::FutureExt;
-use std::collections::HashSet;
+use tokio::time::{Duration, timeout};
 
 /// Hot-reload manager for OCR models
 pub struct HotReloadManager {
@@ -38,19 +38,17 @@ impl HotReloadManager {
         let debounce_duration = self.debounce_duration;
 
         let mut watcher = RecommendedWatcher::new(
-            move |res: Result<Event, notify::Error>| {
-                match res {
-                    Ok(event) => {
-                        if Self::should_trigger_reload(&event) {
-                            Self::schedule_reload(
-                                Arc::clone(&reload_callback),
-                                Arc::clone(&pending_reload),
-                                debounce_duration,
-                            );
-                        }
+            move |res: Result<Event, notify::Error>| match res {
+                Ok(event) => {
+                    if Self::should_trigger_reload(&event) {
+                        Self::schedule_reload(
+                            Arc::clone(&reload_callback),
+                            Arc::clone(&pending_reload),
+                            debounce_duration,
+                        );
                     }
-                    Err(e) => log::error!("Watch error: {:?}", e),
                 }
+                Err(e) => log::error!("Watch error: {:?}", e),
             },
             Config::default(),
         )?;
@@ -79,10 +77,22 @@ impl HotReloadManager {
     /// Check if an event should trigger a reload
     fn should_trigger_reload(event: &Event) -> bool {
         // Watch for changes to model files
-        let watched_files = ["det.onnx", "rec.onnx", "cls.onnx", "dictionary.txt", "config.json"];
-        let watched_kinds = [notify::EventKind::Create(notify::event::CreateKind::File),
-                           notify::EventKind::Modify(notify::event::ModifyKind::Data(notify::event::DataChange::Any)),
-                           notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::Any))];
+        let watched_files = [
+            "det.onnx",
+            "rec.onnx",
+            "cls.onnx",
+            "dictionary.txt",
+            "config.json",
+        ];
+        let watched_kinds = [
+            notify::EventKind::Create(notify::event::CreateKind::File),
+            notify::EventKind::Modify(notify::event::ModifyKind::Data(
+                notify::event::DataChange::Any,
+            )),
+            notify::EventKind::Modify(notify::event::ModifyKind::Name(
+                notify::event::RenameMode::Any,
+            )),
+        ];
 
         if !watched_kinds.contains(&event.kind) {
             return false;

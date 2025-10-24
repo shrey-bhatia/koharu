@@ -2,7 +2,7 @@
 
 import { Button, Select, Text, Badge, Callout, Slider } from '@radix-ui/themes'
 import { Settings2, Info } from 'lucide-react'
-import { useEditorStore, INPAINTING_PRESETS } from '@/lib/state'
+import { useEditorStore } from '@/lib/state'
 import { useState } from 'react'
 
 export default function InpaintSettings() {
@@ -124,11 +124,11 @@ export default function InpaintSettings() {
             <Slider
               value={[inpaintingConfig.maskThreshold]}
               onValueChange={([v]) => setInpaintingConfig({ maskThreshold: v })}
-              min={20}
+              min={0}
               max={50}
               step={1}
             />
-            <Text size='1' color='gray'>Lower = includes more pixels as "text"</Text>
+            <Text size='1' color='gray'>Lower = includes more pixels as &quot;text&quot;</Text>
           </div>
 
           {/* Feather Radius */}

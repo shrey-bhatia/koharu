@@ -11,8 +11,8 @@ export interface RGB {
 export interface InpaintingConfig {
   // Core quality parameters
   padding: number              // 15-100px, default: 50
-  targetSize: number           // 256/384/512/768/1024, default: 512
-  maskThreshold: number        // 20-50, default: 30
+  targetSize: number           // Locked to 512px (current LaMa model limit)
+  maskThreshold: number        // 0-50, default: 30
   maskErosion: number          // 0-10px, default: 3
   maskDilation: number         // 0-5px, default: 0
   featherRadius: number        // 0-15px, default: 5
@@ -32,7 +32,7 @@ export interface InpaintingConfig {
 
 export const INPAINTING_PRESETS: Record<'fast' | 'balanced' | 'quality', InpaintingConfig> = {
   fast: {
-    padding: 0,
+    padding: 30,
     targetSize: 512,  // NOTE: LaMa model only supports 512px, this is kept for API compat
     maskThreshold: 30,
     maskErosion: 1,
@@ -46,7 +46,7 @@ export const INPAINTING_PRESETS: Record<'fast' | 'balanced' | 'quality', Inpaint
     exportTriptychs: false,
   },
   balanced: {
-    padding: 0,
+    padding: 50,
     targetSize: 512,  // NOTE: LaMa model only supports 512px
     maskThreshold: 30,
     maskErosion: 2,
@@ -60,7 +60,7 @@ export const INPAINTING_PRESETS: Record<'fast' | 'balanced' | 'quality', Inpaint
     exportTriptychs: false,
   },
   quality: {
-    padding: 0,
+    padding: 80,
     targetSize: 512,  // NOTE: LaMa model only supports 512px
     maskThreshold: 30,
     maskErosion: 3,
@@ -73,6 +73,12 @@ export const INPAINTING_PRESETS: Record<'fast' | 'balanced' | 'quality', Inpaint
     showDebugOverlays: false,
     exportTriptychs: false,
   },
+}
+
+export interface SegmentationMaskInfo {
+  data: Uint8Array
+  width: number
+  height: number
 }
 
 export interface ColorPalette {
@@ -260,6 +266,8 @@ export const useEditorStore = create(
       ollamaSystemPrompt: loadOllamaSystemPrompt(),
   translationProvider: loadTranslationProvider(),
   segmentationMask: null,
+  segmentationMaskWidth: null,
+  segmentationMaskHeight: null,
   segmentationMaskBitmap: null,
   showSegmentationMask: false,
       inpaintedImage: null,
@@ -294,7 +302,9 @@ export const useEditorStore = create(
       ollamaModel: string
       ollamaSystemPrompt: string
       translationProvider: 'google' | 'deepl-free' | 'deepl-pro' | 'ollama'
-  segmentationMask: number[] | null
+  segmentationMask: Uint8Array | null
+  segmentationMaskWidth: number | null
+  segmentationMaskHeight: number | null
   segmentationMaskBitmap: ImageBitmap | null
   showSegmentationMask: boolean
       inpaintedImage: Image | null
@@ -341,6 +351,8 @@ export const useEditorStore = create(
           },
           textBlocks: [],
           segmentationMask: null,
+          segmentationMaskWidth: null,
+          segmentationMaskHeight: null,
           segmentationMaskBitmap: null,
           inpaintedImage: null,
           selectedBlockIndex: null,
@@ -388,7 +400,12 @@ export const useEditorStore = create(
         }
         set({ ollamaSystemPrompt: prompt })
       },
-      setSegmentationMask: (mask: number[] | null) => set({ segmentationMask: mask }),
+      setSegmentationMask: (mask: SegmentationMaskInfo | null) =>
+        set({
+          segmentationMask: mask ? mask.data : null,
+          segmentationMaskWidth: mask ? mask.width : null,
+          segmentationMaskHeight: mask ? mask.height : null,
+        }),
       setSegmentationMaskBitmap: (bitmap: ImageBitmap | null) =>
         set((state) => {
           if (state.segmentationMaskBitmap && state.segmentationMaskBitmap !== bitmap) {
@@ -439,10 +456,19 @@ export const useEditorStore = create(
           inpaintingPreset: preset,
         }),
       setInpaintingConfig: (config: Partial<InpaintingConfig>) =>
-        set((state) => ({
-          inpaintingConfig: { ...state.inpaintingConfig, ...config },
-          inpaintingPreset: 'custom', // Mark as custom when user tweaks
-        })),
+        set((state) => {
+          const nextConfig = { ...state.inpaintingConfig, ...config }
+
+          if (config.maskThreshold !== undefined) {
+            const clamped = Math.max(0, Math.min(255, Math.round(config.maskThreshold)))
+            nextConfig.maskThreshold = clamped
+          }
+
+          return {
+            inpaintingConfig: nextConfig,
+            inpaintingPreset: 'custom', // Mark as custom when user tweaks
+          }
+        }),
       setDefaultFont: (font: string) => {
         if (typeof window !== 'undefined') {
           localStorage.setItem('default_font', font)

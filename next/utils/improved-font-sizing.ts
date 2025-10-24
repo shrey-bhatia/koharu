@@ -19,6 +19,34 @@ export interface ImprovedFontMetrics {
   rotationDeg?: number
 }
 
+type MeasurementContext = {
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
+}
+
+const measurementContext = createMeasurementContext()
+const measurementCache = new Map<string, { width: number; height: number }>()
+const MAX_MEASUREMENT_CACHE_ENTRIES = 2000
+
+function createMeasurementContext(): MeasurementContext | null {
+  if (typeof OffscreenCanvas !== 'undefined') {
+    const canvas = new OffscreenCanvas(1, 1)
+    const ctx = canvas.getContext('2d')
+    if (ctx) {
+      return { ctx }
+    }
+  }
+
+  if (typeof document !== 'undefined') {
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    if (ctx) {
+      return { ctx }
+    }
+  }
+
+  return null
+}
+
 /**
  * Calculate optimal font size using layout-aware strategy
  */
@@ -110,27 +138,41 @@ function optimizeFontSize(
   strategy: LayoutStrategy,
   initialEstimate: number
 ): Omit<ImprovedFontMetrics, 'alignment' | 'rotationDeg'> {
-  let bestFontSize = initialEstimate
-  let bestPenalty = Infinity
-  let bestResult: Omit<ImprovedFontMetrics, 'alignment' | 'rotationDeg'> | null = null
+  interface Evaluation {
+    fontSize: number
+    lines: string[]
+    width: number
+    height: number
+    penalty: number
+  }
 
-  // Search range around initial estimate
+  const evaluationCache = new Map<number, Evaluation>()
+  const letterSpacing = strategy.letterSpacingAdjustment
+  const lineHeightMultiplier = strategy.lineHeightMultiplier
+
   const searchRadius = initialEstimate * 0.5
-  const minSize = Math.max(8, initialEstimate - searchRadius)
-  const maxSize = Math.min(72, initialEstimate + searchRadius)
-  const step = 1
+  const minSize = Math.max(8, Math.floor(initialEstimate - searchRadius))
+  const maxSize = Math.min(72, Math.ceil(initialEstimate + searchRadius))
+  const normalizedMin = Math.min(minSize, maxSize)
+  const normalizedMax = Math.max(minSize, maxSize)
 
-  for (let fontSize = minSize; fontSize <= maxSize; fontSize += step) {
-    const lineHeight = fontSize * strategy.lineHeightMultiplier
-    const letterSpacing = strategy.letterSpacingAdjustment
+  const clampFontSize = (value: number) =>
+    Math.max(normalizedMin, Math.min(normalizedMax, Math.round(value)))
 
-    // Break text into lines using balanced breaking
+  const evaluate = (fontSize: number): Evaluation => {
+    if (evaluationCache.has(fontSize)) {
+      return evaluationCache.get(fontSize) as Evaluation
+    }
+
     const lines = balancedLineBreak(text, maxWidth, fontSize, fontFamily, letterSpacing)
+    const { width, height } = measureLines(
+      lines,
+      fontSize,
+      fontFamily,
+      letterSpacing,
+      lineHeightMultiplier
+    )
 
-    // Measure result
-    const { width, height } = measureLines(lines, fontSize, fontFamily, letterSpacing, lineHeight)
-
-    // Calculate penalty
     const penalty = calculatePenalty(
       width,
       height,
@@ -140,35 +182,56 @@ function optimizeFontSize(
       strategy.targetCoverageRatio
     )
 
-    if (penalty < bestPenalty) {
-      bestPenalty = penalty
-      bestFontSize = fontSize
-      bestResult = {
-        fontSize,
-        lines,
-        actualWidth: width,
-        actualHeight: height,
-        lineHeight: strategy.lineHeightMultiplier,
-        letterSpacing,
-      }
-    }
-  }
-
-  // Fallback if no solution found
-  if (!bestResult) {
-    const lines = balancedLineBreak(text, maxWidth, 12, fontFamily, 0)
-    const { width, height } = measureLines(lines, 12, fontFamily, 0, 1.2)
-    bestResult = {
-      fontSize: 12,
+    const evaluation: Evaluation = {
+      fontSize,
       lines,
-      actualWidth: width,
-      actualHeight: height,
-      lineHeight: 1.2,
-      letterSpacing: 0,
+      width,
+      height,
+      penalty,
+    }
+
+    evaluationCache.set(fontSize, evaluation)
+    return evaluation
+  }
+
+  let low = normalizedMin
+  let high = normalizedMax
+  let bestFit: Evaluation | null = null
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2)
+    const evaluation = evaluate(mid)
+
+    if (evaluation.width <= maxWidth && evaluation.height <= maxHeight) {
+      bestFit = evaluation
+      low = mid + 1
+    } else {
+      high = mid - 1
     }
   }
 
-  return bestResult
+  const fallbackSize = clampFontSize(initialEstimate || 12)
+  const pivotEvaluation = bestFit ?? evaluate(fallbackSize)
+
+  let bestEvaluation = pivotEvaluation
+  const neighborhoodStart = Math.max(minSize, pivotEvaluation.fontSize - 3)
+  const neighborhoodEnd = Math.min(maxSize, pivotEvaluation.fontSize + 3)
+
+  for (let fontSize = neighborhoodStart; fontSize <= neighborhoodEnd; fontSize++) {
+    const evaluation = evaluate(fontSize)
+    if (evaluation.penalty < bestEvaluation.penalty) {
+      bestEvaluation = evaluation
+    }
+  }
+
+  return {
+    fontSize: bestEvaluation.fontSize,
+    lines: bestEvaluation.lines,
+    actualWidth: bestEvaluation.width,
+    actualHeight: bestEvaluation.height,
+    lineHeight: lineHeightMultiplier,
+    letterSpacing,
+  }
 }
 
 /**
@@ -214,25 +277,36 @@ function measureText(
   fontFamily: string,
   letterSpacing: number
 ): { width: number; height: number } {
-  if (typeof document === 'undefined') {
+  if (!measurementContext) {
     // SSR fallback
     return { width: text.length * fontSize * 0.6, height: fontSize }
   }
 
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    return { width: text.length * fontSize * 0.6, height: fontSize }
+  const key = `${fontFamily}|${fontSize}|${letterSpacing}|${text}`
+  const cached = measurementCache.get(key)
+  if (cached) {
+    return cached
   }
 
+  const { ctx } = measurementContext
   ctx.font = `${fontSize}px ${fontFamily}`
-  ctx.letterSpacing = `${letterSpacing}px`
-  const metrics = ctx.measureText(text)
 
-  return {
+  if ('letterSpacing' in ctx) {
+    ;(ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${letterSpacing}px`
+  }
+
+  const metrics = ctx.measureText(text)
+  const result = {
     width: metrics.width,
     height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent || fontSize,
   }
+
+  if (measurementCache.size >= MAX_MEASUREMENT_CACHE_ENTRIES) {
+    measurementCache.clear()
+  }
+
+  measurementCache.set(key, result)
+  return result
 }
 
 /**

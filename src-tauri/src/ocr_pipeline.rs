@@ -1,13 +1,13 @@
-use anyhow::{Context, Result};
-use image::DynamicImage;
-use ort::{session::Session, value::Tensor};
-use crate::model_package::ModelPackage;
 use crate::accuracy::AccuracyMetrics;
-use std::sync::Arc;
-use std::path::Path;
-use std::collections::HashMap;
-use tokio::sync::Mutex;
+use crate::model_package::ModelPackage;
+use anyhow::{Context, Result};
+use image::{DynamicImage, GenericImageView};
+use manga_ocr::MangaOCR;
 use ndarray::Array4;
+use ort::{session::Session, value::Tensor};
+use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Debug, Clone)]
 pub struct TextRegion {
@@ -23,6 +23,9 @@ pub enum DeviceConfig {
     Cuda,
 }
 
+pub const PADDLE_OCR_KEY: &str = "paddle-ocr";
+pub const MANGA_OCR_KEY: &str = "manga-ocr";
+
 #[derive(Debug)]
 pub struct PaddleOcrPipeline {
     det_session: Arc<Mutex<Session>>,
@@ -36,7 +39,7 @@ pub struct PaddleOcrPipeline {
 impl PaddleOcrPipeline {
     pub async fn new(model_dir: &Path, device: DeviceConfig) -> Result<Self> {
         let package = ModelPackage::from_dir(model_dir)?;
-        
+
         // Note: ORT execution provider is configured globally in lib.rs
         // Sessions will inherit the global execution provider automatically
         let execution_provider = match device {
@@ -87,7 +90,10 @@ impl PaddleOcrPipeline {
 
     /// Log ONNX Runtime session metadata for debugging
     async fn log_session_metadata(&self) {
-        log::info!("OCR Pipeline initialized with execution provider: {}", self.execution_provider);
+        log::info!(
+            "OCR Pipeline initialized with execution provider: {}",
+            self.execution_provider
+        );
 
         // Log detection session metadata
         let det_session = self.det_session.lock().await;
@@ -136,7 +142,11 @@ impl PaddleOcrPipeline {
     }
 
     /// Recognize text in detected regions
-    pub async fn recognize_text(&self, image: &DynamicImage, regions: &[TextRegion]) -> Result<Vec<TextRegion>> {
+    pub async fn recognize_text(
+        &self,
+        image: &DynamicImage,
+        regions: &[TextRegion],
+    ) -> Result<Vec<TextRegion>> {
         let mut results = Vec::new();
 
         for region in regions {
@@ -184,11 +194,13 @@ impl PaddleOcrPipeline {
 
     fn preprocess_detection(&self, image: &DynamicImage) -> Result<Array4<f32>> {
         // Resize image according to config
-        let resized = image.resize_exact(
-            self.package.config.det.input_shape[3] as u32,
-            self.package.config.det.input_shape[2] as u32,
-            image::imageops::FilterType::Lanczos3
-        ).to_rgb8();
+        let resized = image
+            .resize_exact(
+                self.package.config.det.input_shape[3] as u32,
+                self.package.config.det.input_shape[2] as u32,
+                image::imageops::FilterType::Lanczos3,
+            )
+            .to_rgb8();
 
         let mut tensor = Array4::zeros((
             self.package.config.det.input_shape[0] as usize,
@@ -199,9 +211,15 @@ impl PaddleOcrPipeline {
 
         // Normalize according to config
         for (x, y, pixel) in resized.enumerate_pixels() {
-            tensor[[0, 0, y as usize, x as usize]] = (pixel[0] as f32 / 255.0 - self.package.config.det.mean[0]) / self.package.config.det.std[0];
-            tensor[[0, 1, y as usize, x as usize]] = (pixel[1] as f32 / 255.0 - self.package.config.det.mean[1]) / self.package.config.det.std[1];
-            tensor[[0, 2, y as usize, x as usize]] = (pixel[2] as f32 / 255.0 - self.package.config.det.mean[2]) / self.package.config.det.std[2];
+            tensor[[0, 0, y as usize, x as usize]] = (pixel[0] as f32 / 255.0
+                - self.package.config.det.mean[0])
+                / self.package.config.det.std[0];
+            tensor[[0, 1, y as usize, x as usize]] = (pixel[1] as f32 / 255.0
+                - self.package.config.det.mean[1])
+                / self.package.config.det.std[1];
+            tensor[[0, 2, y as usize, x as usize]] = (pixel[2] as f32 / 255.0
+                - self.package.config.det.mean[2])
+                / self.package.config.det.std[2];
         }
 
         Ok(tensor)
@@ -238,7 +256,11 @@ impl PaddleOcrPipeline {
         Ok("recognized_text".to_string())
     }
 
-    async fn classify_angle(&self, regions: &mut [TextRegion], _image: &DynamicImage) -> Result<()> {
+    async fn classify_angle(
+        &self,
+        regions: &mut [TextRegion],
+        _image: &DynamicImage,
+    ) -> Result<()> {
         if let Some(_cls_session) = &self.cls_session {
             // Angle classification implementation
             // This would run the classification model on each region
@@ -261,11 +283,13 @@ impl PaddleOcrPipeline {
     }
 
     fn preprocess_recognition(&self, image: &DynamicImage) -> Result<Array4<f32>> {
-        let rgb = image.resize_exact(
-            self.package.config.rec.input_shape[3] as u32,
-            self.package.config.rec.input_shape[2] as u32,
-            image::imageops::FilterType::Lanczos3
-        ).to_rgb8();
+        let rgb = image
+            .resize_exact(
+                self.package.config.rec.input_shape[3] as u32,
+                self.package.config.rec.input_shape[2] as u32,
+                image::imageops::FilterType::Lanczos3,
+            )
+            .to_rgb8();
 
         let mut tensor = Array4::zeros((
             1,
@@ -275,21 +299,47 @@ impl PaddleOcrPipeline {
         ));
 
         for (x, y, pixel) in rgb.enumerate_pixels() {
-            tensor[[0, 0, y as usize, x as usize]] = (pixel[0] as f32 / 255.0 - self.package.config.rec.mean[0]) / self.package.config.rec.std[0];
-            tensor[[0, 1, y as usize, x as usize]] = (pixel[1] as f32 / 255.0 - self.package.config.rec.mean[1]) / self.package.config.rec.std[1];
-            tensor[[0, 2, y as usize, x as usize]] = (pixel[2] as f32 / 255.0 - self.package.config.rec.mean[2]) / self.package.config.rec.std[2];
+            tensor[[0, 0, y as usize, x as usize]] = (pixel[0] as f32 / 255.0
+                - self.package.config.rec.mean[0])
+                / self.package.config.rec.std[0];
+            tensor[[0, 1, y as usize, x as usize]] = (pixel[1] as f32 / 255.0
+                - self.package.config.rec.mean[1])
+                / self.package.config.rec.std[1];
+            tensor[[0, 2, y as usize, x as usize]] = (pixel[2] as f32 / 255.0
+                - self.package.config.rec.mean[2])
+                / self.package.config.rec.std[2];
         }
 
         Ok(tensor)
     }
+}
 
+pub struct MangaOcrPipeline {
+    inner: Mutex<MangaOCR>,
+}
 
+impl MangaOcrPipeline {
+    pub fn new(instance: MangaOCR) -> Self {
+        Self {
+            inner: Mutex::new(instance),
+        }
+    }
+}
+
+impl std::fmt::Debug for MangaOcrPipeline {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MangaOcrPipeline").finish_non_exhaustive()
+    }
 }
 
 #[async_trait::async_trait]
 pub trait OcrPipeline: Send + Sync + std::fmt::Debug {
     async fn detect_text_regions(&self, image: &DynamicImage) -> Result<Vec<TextRegion>>;
-    async fn recognize_text(&self, image: &DynamicImage, regions: &[TextRegion]) -> Result<Vec<String>>;
+    async fn recognize_text(
+        &self,
+        image: &DynamicImage,
+        regions: &[TextRegion],
+    ) -> Result<Vec<String>>;
 }
 
 #[async_trait::async_trait]
@@ -298,8 +348,36 @@ impl OcrPipeline for PaddleOcrPipeline {
         self.detect_text(image).await
     }
 
-    async fn recognize_text(&self, image: &DynamicImage, regions: &[TextRegion]) -> Result<Vec<String>> {
+    async fn recognize_text(
+        &self,
+        image: &DynamicImage,
+        regions: &[TextRegion],
+    ) -> Result<Vec<String>> {
         let results = self.recognize_text(image, regions).await?;
         Ok(results.into_iter().map(|r| r.text).collect())
+    }
+}
+
+#[async_trait::async_trait]
+impl OcrPipeline for MangaOcrPipeline {
+    async fn detect_text_regions(&self, image: &DynamicImage) -> Result<Vec<TextRegion>> {
+        let (width, height) = image.dimensions();
+        Ok(vec![TextRegion {
+            bbox: [0.0, 0.0, width as f32, height as f32],
+            confidence: 1.0,
+            text: String::new(),
+            angle: None,
+        }])
+    }
+
+    async fn recognize_text(
+        &self,
+        image: &DynamicImage,
+        regions: &[TextRegion],
+    ) -> Result<Vec<String>> {
+        let mut guard = self.inner.lock().await;
+        // MangaOCR operates on the full image crop that caller already prepared.
+        let text = guard.inference(image)?;
+        Ok(regions.iter().map(|_| text.clone()).collect())
     }
 }

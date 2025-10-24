@@ -4,9 +4,16 @@ import { useState } from 'react'
 import { Play } from 'lucide-react'
 import { Button, Slider, Text } from '@radix-ui/themes'
 import { invoke } from '@tauri-apps/api/core'
-import { useEditorStore } from '@/lib/state'
+import { SegmentationMaskInfo, TextBlock, useEditorStore } from '@/lib/state'
 import { analyzeTextAppearance } from '@/utils/appearance-analysis'
-import { createSegmentationMaskBitmap } from '@/utils/image'
+import { createSegmentationMaskBitmap, imageBitmapToGrayscaleUint8 } from '@/utils/image'
+
+type DetectionResponse = {
+  bboxes: TextBlock[]
+  maskPng: number[]
+  maskWidth: number
+  maskHeight: number
+}
 
 export default function DetectionPanel() {
   const {
@@ -26,12 +33,19 @@ export default function DetectionPanel() {
   const [nmsThreshold, setNmsThreshold] = useState(0.5)
 
   const run = async () => {
+    if (!image?.buffer) {
+      console.warn('Cannot run detection without a loaded image.')
+      return
+    }
+
+    const sourceImage = image
+
     setLoading(true)
 
     try {
       const hadMaskBitmap = Boolean(segmentationMaskBitmap)
-      const result = await invoke<any>('detection', {
-        image: image.buffer,
+      const result = await invoke<DetectionResponse>('detection', {
+        image: sourceImage.buffer,
         confidenceThreshold: confidenceThreshold,
         nmsThreshold: nmsThreshold,
       })
@@ -41,34 +55,47 @@ export default function DetectionPanel() {
       let blocks = result?.bboxes || []
 
       // Store segmentation mask for inpainting
-      if (result?.segment) {
-        setSegmentationMask(result.segment)
-        console.log('Segmentation mask stored:', result.segment.length, 'bytes')
+      if (result?.maskPng?.length) {
+        const maskBytes = new Uint8Array(result.maskPng)
+        const maskBlob = new Blob([maskBytes], { type: 'image/png' })
+        const maskBitmap = await createImageBitmap(maskBlob)
 
-        if (image?.bitmap) {
-          try {
-            const maskBitmap = await createSegmentationMaskBitmap(result.segment, {
-              targetWidth: image.bitmap.width,
-              targetHeight: image.bitmap.height,
-              alpha: 160,
-            })
-            setSegmentationMaskBitmap(maskBitmap)
+        const maskArray = await imageBitmapToGrayscaleUint8(maskBitmap)
+        maskBitmap.close?.()
 
-            if (!hadMaskBitmap && !showSegmentationMask) {
-              setShowSegmentationMask(true)
-            }
-          } catch (maskError) {
-            console.error('Failed to prepare segmentation mask preview:', maskError)
-            setSegmentationMaskBitmap(null)
+        const maskInfo: SegmentationMaskInfo = {
+          data: maskArray,
+          width: result.maskWidth,
+          height: result.maskHeight,
+        }
+
+        setSegmentationMask(maskInfo)
+        console.log('Segmentation mask stored:', maskArray.length, 'bytes')
+
+        try {
+          const overlayBitmap = await createSegmentationMaskBitmap(maskArray, {
+            targetWidth: sourceImage.bitmap.width,
+            targetHeight: sourceImage.bitmap.height,
+            maskWidth: maskInfo.width,
+            maskHeight: maskInfo.height,
+            alpha: 160,
+          })
+          setSegmentationMaskBitmap(overlayBitmap)
+
+          if (!hadMaskBitmap && !showSegmentationMask) {
+            setShowSegmentationMask(true)
           }
+        } catch (maskError) {
+          console.error('Failed to prepare segmentation mask preview:', maskError)
+          setSegmentationMaskBitmap(null)
         }
 
         // Run appearance analysis automatically
-        if (blocks.length > 0 && image?.bitmap) {
+        if (blocks.length > 0) {
           console.log('Running appearance analysis on', blocks.length, 'blocks...')
           const startTime = performance.now()
 
-          blocks = await analyzeTextAppearance(image.bitmap, result.segment, blocks)
+          blocks = await analyzeTextAppearance(sourceImage.bitmap, maskArray, blocks)
 
           const duration = performance.now() - startTime
           console.log(`Appearance analysis completed in ${duration.toFixed(2)}ms`)

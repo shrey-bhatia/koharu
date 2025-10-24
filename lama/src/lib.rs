@@ -85,8 +85,8 @@ fn revert_resize_padding(
     // First crop to remove padding
     let cropped = padded.crop_imm(0, 0, resized_width, resized_height);
 
-    // Then resize back to original dimensions
-    cropped.resize(orig_width, orig_height, filter)
+    // Then resize back to original dimensions (force exact target to avoid off-by-one)
+    cropped.resize_exact(orig_width, orig_height, filter)
 }
 
 impl Lama {
@@ -107,7 +107,7 @@ impl Lama {
         &mut self,
         image: &DynamicImage,
         mask: &DynamicImage,
-        _target_size: u32,  // IGNORED: LaMa model is hardcoded to 512x512
+        _target_size: u32, // IGNORED: LaMa model is hardcoded to 512x512
     ) -> anyhow::Result<DynamicImage> {
         // NOTE: The LaMa ONNX model only accepts 512x512 input tensors.
         // The target_size parameter is kept for API compatibility but ignored.
@@ -117,7 +117,8 @@ impl Lama {
         let (orig_width, orig_height) = image.dimensions();
         let (image, resize_info) =
             resize_with_padding(&image, model_size, image::imageops::FilterType::CatmullRom);
-        let (mask, _) = resize_with_padding(&mask, model_size, image::imageops::FilterType::CatmullRom);
+        let (mask, _) =
+            resize_with_padding(&mask, model_size, image::imageops::FilterType::CatmullRom);
 
         let size = model_size as usize;
         let mut image_data = ndarray::Array::zeros((1, 3, size, size));
@@ -155,9 +156,15 @@ impl Lama {
         let mut output_image = image::RgbImage::new(model_size, model_size);
         for y in 0..model_size {
             for x in 0..model_size {
-                let r = (output[[0, 0, y as usize, x as usize]] * 255.0).clamp(0.0, 255.0).round() as u8;
-                let g = (output[[0, 1, y as usize, x as usize]] * 255.0).clamp(0.0, 255.0).round() as u8;
-                let b = (output[[0, 2, y as usize, x as usize]] * 255.0).clamp(0.0, 255.0).round() as u8;
+                let r = (output[[0, 0, y as usize, x as usize]] * 255.0)
+                    .clamp(0.0, 255.0)
+                    .round() as u8;
+                let g = (output[[0, 1, y as usize, x as usize]] * 255.0)
+                    .clamp(0.0, 255.0)
+                    .round() as u8;
+                let b = (output[[0, 2, y as usize, x as usize]] * 255.0)
+                    .clamp(0.0, 255.0)
+                    .round() as u8;
                 output_image.put_pixel(x, y, image::Rgb([r, g, b]));
             }
         }

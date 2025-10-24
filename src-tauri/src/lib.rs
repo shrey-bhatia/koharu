@@ -1,36 +1,41 @@
+mod accuracy;
 mod commands;
 mod error;
+mod hot_reload;
+mod model_package;
+mod ocr_pipeline;
 mod state;
 mod text_renderer;
-mod model_package;
-mod hot_reload;
-mod accuracy;
 mod vertical_text_tests;
-mod ocr_pipeline;
 
 use comic_text_detector::ComicTextDetector;
 use lama::Lama;
 use manga_ocr::MangaOCR;
-use tauri::{AppHandle, Manager, async_runtime::spawn};
-use tauri_plugin_dialog::{MessageDialogKind, DialogExt};
-use tokio::sync::RwLock;
 use std::collections::HashMap;
-use tokio::sync::Mutex;
 use std::fs;
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tauri::{AppHandle, Manager, async_runtime::spawn};
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
-use crate::ocr_pipeline::{PaddleOcrPipeline, DeviceConfig, OcrPipeline};
-use crate::state::{AppState, GpuInitResult};
 use crate::commands::{
-    detection, ocr, get_system_fonts, inpaint_region, set_gpu_preference,
-    get_gpu_devices, get_current_gpu_status, run_gpu_stress_test,
-    translate_with_deepl, translate_with_ollama, render_and_export_image
+    cache_inpainting_data, cache_ocr_image, clear_inpainting_cache, clear_ocr_cache, detection,
+    get_current_gpu_status, get_gpu_devices, get_system_fonts, inpaint_region,
+    inpaint_region_cached, ocr, ocr_cached_block, render_and_export_image, run_gpu_stress_test,
+    set_active_ocr, set_gpu_preference, translate_with_deepl, translate_with_ollama,
 };
+use crate::ocr_pipeline::{
+    DeviceConfig, MANGA_OCR_KEY, MangaOcrPipeline, OcrPipeline, PADDLE_OCR_KEY, PaddleOcrPipeline,
+};
+use crate::state::{AppState, GpuInitResult};
 
 // Read GPU preference from config file
 fn read_gpu_preference(app: &AppHandle) -> String {
-    let app_dir = app.path().app_config_dir()
+    let app_dir = app
+        .path()
+        .app_config_dir()
         .expect("Failed to get app config directory");
 
     fs::create_dir_all(&app_dir).ok();
@@ -48,12 +53,10 @@ fn read_gpu_preference(app: &AppHandle) -> String {
 fn get_cuda_device_name(_device_id: u32) -> Option<String> {
     use nvml_wrapper::Nvml;
     match Nvml::init() {
-        Ok(nvml) => {
-            match nvml.device_by_index(_device_id) {
-                Ok(device) => device.name().ok(),
-                Err(_) => None,
-            }
-        }
+        Ok(nvml) => match nvml.device_by_index(_device_id) {
+            Ok(device) => device.name().ok(),
+            Err(_) => None,
+        },
         Err(_) => None,
     }
 }
@@ -87,7 +90,7 @@ fn get_available_ort_providers() -> Vec<String> {
 
 // Get GPU adapter info using wgpu (works for DirectML)
 fn get_wgpu_adapter_name(device_id: u32) -> Option<String> {
-    use wgpu::{Instance, InstanceDescriptor, Backends};
+    use wgpu::{Backends, Instance, InstanceDescriptor};
 
     let instance = Instance::new(InstanceDescriptor {
         backends: Backends::all(),
@@ -126,33 +129,16 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
         warmup_time_ms: 0,
     };
 
-    // Create model instances (placeholder for now)
-    let comic_text_detector = ComicTextDetector::new()?;
-    let lama = Lama::new()?;
-    let mut ocr_pipelines = std::collections::HashMap::new();
-    
     // Define model directory
     let model_dir = app.path().app_data_dir()?.join("models");
     std::fs::create_dir_all(&model_dir)?;
-    
+
     // Map GPU preference to DeviceConfig for OCR pipeline
     let ocr_device_config = match gpu_pref.as_str() {
         "cuda" => DeviceConfig::Cuda,
         "directml" => DeviceConfig::Cuda, // DirectML uses CUDA provider in ORT
         _ => DeviceConfig::Cpu,
     };
-    
-    // Initialize OCR pipelines (optional - app can run without models)
-    match PaddleOcrPipeline::new(&model_dir, ocr_device_config).await {
-        Ok(ocr_pipeline) => {
-            ocr_pipelines.insert("default".to_string(), Arc::new(ocr_pipeline) as Arc<dyn OcrPipeline + Send + Sync>);
-            tracing::info!("✓ OCR pipeline initialized successfully");
-        }
-        Err(e) => {
-            tracing::warn!("OCR pipeline initialization failed (models not available): {}", e);
-            tracing::info!("Application will continue without OCR functionality. Models can be added later.");
-        }
-    }
 
     // FAIL FAST: Verify requested provider is available before init
     match gpu_pref.as_str() {
@@ -232,8 +218,46 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
 
     // Load models
     let comic_text_detector = ComicTextDetector::new()?;
-    let manga_ocr = MangaOCR::new()?;
     let mut lama = Lama::new()?;
+
+    let mut ocr_pipelines: HashMap<String, Arc<dyn OcrPipeline + Send + Sync>> = HashMap::new();
+
+    match PaddleOcrPipeline::new(&model_dir, ocr_device_config).await {
+        Ok(ocr_pipeline) => {
+            ocr_pipelines.insert(
+                PADDLE_OCR_KEY.to_string(),
+                Arc::new(ocr_pipeline) as Arc<dyn OcrPipeline + Send + Sync>,
+            );
+            tracing::info!(
+                "✓ OCR pipeline initialized successfully (key={})",
+                PADDLE_OCR_KEY
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                "OCR pipeline initialization failed (models not available): {}",
+                e
+            );
+            tracing::info!(
+                "Application will continue without Paddle OCR. MangaOCR fallback will be used if available."
+            );
+        }
+    }
+
+    match MangaOCR::new() {
+        Ok(manga_ocr) => {
+            let manga_pipeline =
+                Arc::new(MangaOcrPipeline::new(manga_ocr)) as Arc<dyn OcrPipeline + Send + Sync>;
+            ocr_pipelines.insert(MANGA_OCR_KEY.to_string(), manga_pipeline);
+            tracing::info!("✓ MangaOCR pipeline registered (key={})", MANGA_OCR_KEY);
+        }
+        Err(err) => {
+            tracing::warn!(
+                "MangaOCR initialization failed. Fallback engine unavailable: {}",
+                err
+            );
+        }
+    }
 
     // Run warmup profiling to verify GPU is actually used
     tracing::info!("Running warmup profiling...");
@@ -268,7 +292,8 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
             init_result.warmup_time_ms,
             expected_max_time
         );
-        init_result.active_provider = format!("{} (possible CPU fallback)", init_result.active_provider);
+        init_result.active_provider =
+            format!("{} (possible CPU fallback)", init_result.active_provider);
         init_result.success = false; // Mark as failed
     } else {
         tracing::info!(
@@ -278,13 +303,35 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
         );
     }
 
+    let default_active_key = if ocr_pipelines.contains_key(PADDLE_OCR_KEY) {
+        PADDLE_OCR_KEY.to_string()
+    } else if ocr_pipelines.contains_key(MANGA_OCR_KEY) {
+        MANGA_OCR_KEY.to_string()
+    } else {
+        ocr_pipelines.keys().next().cloned().unwrap_or_default()
+    };
+
+    let available_keys: Vec<_> = ocr_pipelines.keys().cloned().collect();
+    tracing::info!(
+        "Available OCR engines: {:?} (default={})",
+        available_keys,
+        default_active_key
+    );
+    if default_active_key.is_empty() {
+        tracing::warn!(
+            "No OCR engines registered. OCR commands will return errors until models are installed."
+        );
+    }
+
     app.manage(AppState {
         comic_text_detector: Mutex::new(comic_text_detector),
         lama: Mutex::new(lama),
-        manga_ocr: Mutex::new(Some(manga_ocr)),
         gpu_init_result: Mutex::new(init_result),
         ocr_pipelines: RwLock::new(ocr_pipelines),
-        active_ocr: RwLock::new("default".to_string()),
+        active_ocr: RwLock::new(default_active_key),
+        inpaint_image_cache: RwLock::new(None),
+        inpaint_mask_cache: RwLock::new(None),
+        ocr_image_cache: RwLock::new(None),
     });
 
     app.get_webview_window("splashscreen").unwrap().close()?;
@@ -320,15 +367,22 @@ pub fn run() -> anyhow::Result<()> {
         .invoke_handler(tauri::generate_handler![
             detection,
             ocr,
+            set_active_ocr,
             get_system_fonts,
             inpaint_region,
+            cache_inpainting_data,
+            inpaint_region_cached,
+            clear_inpainting_cache,
             set_gpu_preference,
             get_gpu_devices,
             get_current_gpu_status,
             run_gpu_stress_test,
             translate_with_deepl,
             translate_with_ollama,
-            render_and_export_image
+            render_and_export_image,
+            cache_ocr_image,
+            clear_ocr_cache,
+            ocr_cached_block
         ])
         .run(tauri::generate_context!())?;
 
