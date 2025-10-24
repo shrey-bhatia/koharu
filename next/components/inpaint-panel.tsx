@@ -130,6 +130,16 @@ export default function InpaintPanel() {
         const expectedPixels = result.width * result.height * 4
         const pixelData = Uint8ClampedArray.from(result.image)
 
+        console.debug('Inpaint block received', {
+          index: i,
+          width: result.width,
+          height: result.height,
+          expectedBytes: expectedPixels,
+          actualBytes: pixelData.length,
+          ratio: expectedPixels ? (pixelData.length / expectedPixels).toFixed(3) : 'n/a',
+          firstBytes: Array.from(pixelData.slice(0, 16)),
+        })
+
         if (pixelData.length !== expectedPixels) {
           console.warn('Unexpected inpainted crop size. Falling back to direct drawImage via blob.', {
             expected: expectedPixels,
@@ -231,6 +241,16 @@ export default function InpaintPanel() {
 
         const expectedPixels = result.width * result.height * 4
         const pixelData = Uint8ClampedArray.from(result.image)
+
+        console.debug('NewLaMa inpaint block received', {
+          index: i,
+          width: result.width,
+          height: result.height,
+          expectedBytes: expectedPixels,
+          actualBytes: pixelData.length,
+          ratio: expectedPixels ? (pixelData.length / expectedPixels).toFixed(3) : 'n/a',
+          firstBytes: Array.from(pixelData.slice(0, 16)),
+        })
 
         if (pixelData.length !== expectedPixels) {
           console.warn('Unexpected inpainted crop size. Attempting blob fallback for mask composite.', {

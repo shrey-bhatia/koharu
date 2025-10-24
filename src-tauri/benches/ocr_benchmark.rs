@@ -1,6 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use std::path::Path;
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use image::DynamicImage;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
@@ -47,7 +47,7 @@ pub fn ocr_benchmarks(c: &mut Criterion) {
 /// Create a test image for benchmarking
 fn create_test_image() -> DynamicImage {
     // Create a synthetic image with text-like regions
-    use image::{RgbImage, Rgb};
+    use image::{Rgb, RgbImage};
     let mut img = RgbImage::new(800, 600);
 
     // Add some synthetic text regions (horizontal bars)

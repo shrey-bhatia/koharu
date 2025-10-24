@@ -1,11 +1,11 @@
+use crate::ocr_pipeline::OcrPipeline;
 use comic_text_detector::ComicTextDetector;
 use image::{DynamicImage, GrayImage};
 use lama::Lama;
-use tokio::sync::{Mutex, RwLock};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::ocr_pipeline::OcrPipeline;
+use tokio::sync::{Mutex, RwLock};
 
 #[derive(Clone, Serialize, Debug)]
 pub struct GpuInitResult {
