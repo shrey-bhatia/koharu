@@ -2,30 +2,23 @@
 
 import { Plus, Trash2 } from 'lucide-react'
 import { Button, IconButton } from '@radix-ui/themes'
-import { useEditorStore, TextBlock } from '@/lib/state'
+import { useEditorStore } from '@/lib/state'
 
 export default function DetectionControls() {
-  const { image, textBlocks, setTextBlocks, selectedBlockIndex, setSelectedBlockIndex } = useEditorStore()
+  const {
+    textBlocks,
+    setTextBlocks,
+    selectedBlockIndex,
+    setSelectedBlockIndex,
+    addTextAreaHandler,
+    setSelectedBlockId,
+  } = useEditorStore()
 
   const handleAddTextArea = () => {
-    if (!image) return
-
-    // Add a new text block in the center of the image
-    const centerX = image.bitmap.width / 2
-    const centerY = image.bitmap.height / 2
-    const defaultSize = 100
-
-    const newBlock: TextBlock = {
-      xmin: centerX - defaultSize / 2,
-      ymin: centerY - defaultSize / 2,
-      xmax: centerX + defaultSize / 2,
-      ymax: centerY + defaultSize / 2,
-      confidence: 1.0,
-      class: 0, // Default to black text
+    // Use the handler from canvas which has access to viewport transform
+    if (addTextAreaHandler) {
+      addTextAreaHandler()
     }
-
-    setTextBlocks([...textBlocks, newBlock])
-    setSelectedBlockIndex(textBlocks.length)
   }
 
   const handleDeleteSelected = () => {
@@ -34,6 +27,7 @@ export default function DetectionControls() {
     const updated = textBlocks.filter((_, i) => i !== selectedBlockIndex)
     setTextBlocks(updated)
     setSelectedBlockIndex(null)
+    setSelectedBlockId(null)
   }
 
   return (
@@ -42,7 +36,7 @@ export default function DetectionControls() {
         size='2'
         variant='soft'
         onClick={handleAddTextArea}
-        disabled={!image}
+        disabled={!addTextAreaHandler}
         title='Add manual text area'
       >
         <Plus size={16} />

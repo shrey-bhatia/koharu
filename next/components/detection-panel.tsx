@@ -15,6 +15,25 @@ type DetectionResponse = {
   maskHeight: number
 }
 
+const generateBlockId = (): string => {
+  const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined
+
+  if (cryptoObj?.randomUUID) {
+    return cryptoObj.randomUUID()
+  }
+
+  if (cryptoObj?.getRandomValues) {
+    const buffer = new Uint32Array(4)
+    cryptoObj.getRandomValues(buffer)
+    return Array.from(buffer, (value) => value.toString(16).padStart(8, '0')).join('')
+  }
+
+  return `block-${Math.random().toString(36).slice(2, 10)}`
+}
+
+const ensureTextBlockIds = (blocks: TextBlock[]): TextBlock[] =>
+  blocks.map((block) => (block.id ? block : { ...block, id: generateBlockId() }))
+
 export default function DetectionPanel() {
   const {
     image,
@@ -27,6 +46,8 @@ export default function DetectionPanel() {
     setShowSegmentationMask,
     selectionSensitivity,
     setSelectionSensitivity,
+    setSelectedBlockIndex,
+    setSelectedBlockId,
   } = useEditorStore()
   const [loading, setLoading] = useState(false)
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.5)
@@ -50,9 +71,9 @@ export default function DetectionPanel() {
         nmsThreshold: nmsThreshold,
       })
 
-      console.log('Detection result:', result)
+    console.log('Detection result:', result)
 
-      let blocks = result?.bboxes || []
+    let blocks = result?.bboxes ?? []
 
       // Store segmentation mask for inpainting
       if (result?.maskPng?.length) {
@@ -106,9 +127,10 @@ export default function DetectionPanel() {
         setShowSegmentationMask(false)
       }
 
-      if (blocks.length > 0) {
-        setTextBlocks(blocks)
-      }
+  const blocksWithIds = ensureTextBlockIds(blocks)
+  setTextBlocks(blocksWithIds)
+      setSelectedBlockIndex(null)
+      setSelectedBlockId(null)
     } catch (error) {
       console.error('Error during detection:', error)
     } finally {
