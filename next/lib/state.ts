@@ -104,6 +104,7 @@ export interface AppearanceMetadata {
 }
 
 export type TextBlock = {
+  id?: string
   xmin: number
   ymin: number
   xmax: number
@@ -202,6 +203,18 @@ const loadSelectionSensitivity = (): number => {
   return Math.min(Math.max(parsed, 10), 40)
 }
 
+// Load zoom performance optimizations preference
+const loadZoomOptimizations = (): boolean => {
+  if (typeof window === 'undefined') return true // Default enabled
+  return localStorage.getItem('zoom_optimizations') !== 'false'
+}
+
+// Load zoom performance metrics collection preference
+const loadZoomMetrics = (): boolean => {
+  if (typeof window === 'undefined') return false
+  return localStorage.getItem('zoom_metrics') === 'true'
+}
+
 type SidebarPersistenceState = {
   sidebarWidth: number
   lastExpandedSidebarWidth: number
@@ -259,21 +272,22 @@ export const useEditorStore = create(
       image: null,
       tool: 'detection',
       scale: 1,
-      textBlocks: [],
+  textBlocks: [],
       translationApiKey: loadGoogleApiKey(),
       deeplApiKey: loadDeeplApiKey(),
       ollamaModel: loadOllamaModel(),
       ollamaSystemPrompt: loadOllamaSystemPrompt(),
-  translationProvider: loadTranslationProvider(),
-  segmentationMask: null,
-  segmentationMaskWidth: null,
-  segmentationMaskHeight: null,
-  segmentationMaskBitmap: null,
-  showSegmentationMask: false,
+    translationProvider: loadTranslationProvider(),
+    segmentationMask: null,
+    segmentationMaskWidth: null,
+    segmentationMaskHeight: null,
+    segmentationMaskBitmap: null,
+    showSegmentationMask: false,
       inpaintedImage: null,
       theme: loadTheme(),
       renderMethod: loadRenderMethod(),
       selectedBlockIndex: null,
+    selectedBlockId: null,
       gpuPreference: loadGpuPreference(),
       currentStage: 'original',
       pipelineStages: {
@@ -292,6 +306,9 @@ export const useEditorStore = create(
       sidebarWidth: initialSidebarState.sidebarWidth,
       lastExpandedSidebarWidth: initialSidebarState.lastExpandedSidebarWidth,
       isSidebarCollapsed: initialSidebarState.isSidebarCollapsed,
+      zoomOptimizationsEnabled: loadZoomOptimizations(),
+      zoomMetricsEnabled: loadZoomMetrics(),
+      addTextAreaHandler: null,
     } as {
       image: Image | null
       tool: string
@@ -301,16 +318,17 @@ export const useEditorStore = create(
       deeplApiKey: string | null
       ollamaModel: string
       ollamaSystemPrompt: string
-      translationProvider: 'google' | 'deepl-free' | 'deepl-pro' | 'ollama'
-  segmentationMask: Uint8Array | null
-  segmentationMaskWidth: number | null
-  segmentationMaskHeight: number | null
-  segmentationMaskBitmap: ImageBitmap | null
-  showSegmentationMask: boolean
+    translationProvider: 'google' | 'deepl-free' | 'deepl-pro' | 'ollama'
+    segmentationMask: Uint8Array | null
+    segmentationMaskWidth: number | null
+    segmentationMaskHeight: number | null
+    segmentationMaskBitmap: ImageBitmap | null
+    showSegmentationMask: boolean
       inpaintedImage: Image | null
       theme: 'light' | 'dark'
       renderMethod: 'rectangle' | 'lama' | 'newlama'
       selectedBlockIndex: number | null
+    selectedBlockId: string | null
       gpuPreference: 'cuda' | 'directml' | 'cpu'
       currentStage: 'original' | 'textless' | 'rectangles' | 'final'
       availableOcrModels: string[]
@@ -329,6 +347,9 @@ export const useEditorStore = create(
       sidebarWidth: number
       lastExpandedSidebarWidth: number
       isSidebarCollapsed: boolean
+      zoomOptimizationsEnabled: boolean
+      zoomMetricsEnabled: boolean
+      addTextAreaHandler: (() => void) | null
     },
     (set) => ({
       setImage: (image: Image | null) => set((state) => {
@@ -356,12 +377,33 @@ export const useEditorStore = create(
           segmentationMaskBitmap: null,
           inpaintedImage: null,
           selectedBlockIndex: null,
+          selectedBlockId: null,
           showSegmentationMask: false,
         }
       }),
       setTool: (tool: string) => set({ tool }),
       setScale: (scale: number) => set({ scale }),
       setTextBlocks: (textBlocks: TextBlock[]) => set({ textBlocks }),
+      updateTextBlock: (
+        key: { id?: string | null; index?: number | null },
+        updater: (block: TextBlock) => TextBlock
+      ) =>
+        set((state) => {
+          const { textBlocks } = state
+          const byIdIndex = key.id
+            ? textBlocks.findIndex((block) => block.id != null && block.id === key.id)
+            : -1
+          const candidateIndex = byIdIndex !== -1 ? byIdIndex : key.index ?? -1
+
+          if (candidateIndex < 0 || candidateIndex >= textBlocks.length) {
+            return {}
+          }
+
+          const nextBlocks = textBlocks.slice()
+          nextBlocks[candidateIndex] = updater(nextBlocks[candidateIndex])
+
+          return { textBlocks: nextBlocks }
+        }),
       setTranslationApiKey: (key: string | null) => {
         if (typeof window !== 'undefined') {
           if (key) {
@@ -432,7 +474,8 @@ export const useEditorStore = create(
         }
         set({ renderMethod: method })
       },
-      setSelectedBlockIndex: (index: number | null) => set({ selectedBlockIndex: index }),
+  setSelectedBlockIndex: (index: number | null) => set({ selectedBlockIndex: index }),
+  setSelectedBlockId: (id: string | null) => set({ selectedBlockId: id }),
       setGpuPreference: (pref: 'cuda' | 'directml' | 'cpu') => {
         if (typeof window !== 'undefined') {
           localStorage.setItem('gpu_preference', pref)
@@ -518,6 +561,21 @@ export const useEditorStore = create(
           }
           return { isSidebarCollapsed: collapsed }
         }),
+      setZoomOptimizations: (enabled: boolean) => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('zoom_optimizations', String(enabled))
+        }
+        set({ zoomOptimizationsEnabled: enabled })
+      },
+      setZoomMetrics: (enabled: boolean) => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('zoom_metrics', String(enabled))
+        }
+        set({ zoomMetricsEnabled: enabled })
+      },
+      setAddTextAreaHandler: (handler: (() => void) | null) => {
+        set({ addTextAreaHandler: handler })
+      },
     })
   )
 )
