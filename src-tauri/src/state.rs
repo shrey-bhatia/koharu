@@ -29,4 +29,5 @@ pub struct AppState {
     pub active_ocr: RwLock<String>,
     pub inpaint_image_cache: RwLock<Option<Arc<DynamicImage>>>,
     pub inpaint_mask_cache: RwLock<Option<Arc<GrayImage>>>,
+    pub ocr_image_cache: RwLock<Option<Arc<DynamicImage>>>,
 }

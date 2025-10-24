@@ -21,6 +21,84 @@ pub struct DetectionResult {
     pub mask_height: u32,
 }
 
+struct OcrRunResult {
+    texts: Vec<String>,
+    engine: &'static str,
+    region_count: usize,
+}
+
+async fn run_ocr_with_pipelines(
+    state: &AppState,
+    active_key: &str,
+    image: &DynamicImage,
+    payload_bytes: usize,
+) -> anyhow::Result<OcrRunResult> {
+    let pipeline = {
+        let guard = state.ocr_pipelines.read().await;
+        guard.get(active_key).cloned()
+    };
+
+    if let Some(pipeline) = pipeline {
+        match async {
+            let detect_start = Instant::now();
+            let regions = pipeline.detect_text_regions(image).await?;
+            let detect_elapsed = detect_start.elapsed();
+            tracing::info!(
+                "[ocr:paddle] detect_text_regions took {}ms ({} region(s), payload={} bytes)",
+                detect_elapsed.as_millis(),
+                regions.len(),
+                payload_bytes
+            );
+
+            let recognize_start = Instant::now();
+            let recognized = pipeline.recognize_text(image, &regions).await?;
+            let recognize_elapsed = recognize_start.elapsed();
+            tracing::info!(
+                "[ocr:paddle] recognize_text took {}ms",
+                recognize_elapsed.as_millis()
+            );
+
+            Ok::<OcrRunResult, anyhow::Error>(OcrRunResult {
+                texts: recognized,
+                engine: "paddle",
+                region_count: regions.len(),
+            })
+        }
+        .await
+        {
+            Ok(result) => return Ok(result),
+            Err(err) => {
+                tracing::warn!(
+                    "PaddleOcrPipeline failed for key '{}': {}. Falling back to manga-ocr.",
+                    active_key,
+                    err
+                );
+            }
+        }
+    }
+
+    let mut manga_guard = state.manga_ocr.lock().await;
+    if let Some(manga_ocr) = manga_guard.as_mut() {
+        let inference_start = Instant::now();
+        let text = manga_ocr.inference(image)?;
+        let inference_elapsed = inference_start.elapsed();
+        tracing::info!(
+            "[ocr:manga-ocr] inference took {}ms (payload={} bytes)",
+            inference_elapsed.as_millis(),
+            payload_bytes
+        );
+        Ok(OcrRunResult {
+            texts: vec![text],
+            engine: "manga-ocr",
+            region_count: 1,
+        })
+    } else {
+        Err(anyhow!(
+            "No OCR engines available. PaddleOcrPipeline not found and manga-ocr not initialized."
+        ))
+    }
+}
+
 #[tauri::command]
 pub async fn detection(
     app: AppHandle,
@@ -90,43 +168,169 @@ pub async fn detection(
 #[tauri::command]
 pub async fn ocr(app: AppHandle, image: Vec<u8>) -> CommandResult<Vec<String>> {
     let state = app.state::<AppState>();
+    let command_start = Instant::now();
+    let payload_bytes = image.len();
+
+    let decode_start = Instant::now();
+    let img = image::load_from_memory(&image).context("Failed to load image")?;
+    let decode_elapsed = decode_start.elapsed();
+    tracing::info!(
+        "[ocr] image decode took {}ms ({} bytes, source=frontend)",
+        decode_elapsed.as_millis(),
+        payload_bytes
+    );
+
     let active_key = state.active_ocr.read().await.clone();
-    let pipelines = state.ocr_pipelines.read().await;
-    
-    // Try PaddleOcrPipeline first
-    if let Some(pipeline) = pipelines.get(&active_key) {
-        match (|| async {
-            let img = image::load_from_memory(&image).context("Failed to load image")?;
-            let regions = pipeline.detect_text_regions(&img).await?;
-            let result = pipeline.recognize_text(&img, &regions).await?;
-            Ok::<Vec<String>, anyhow::Error>(result)
-        })().await {
-            Ok(result) => return Ok(result),
-            Err(e) => {
-                tracing::warn!("PaddleOcrPipeline failed: {}. Falling back to manga-ocr.", e);
-            }
-        }
+    let run_result = run_ocr_with_pipelines(&state, &active_key, &img, payload_bytes).await?;
+
+    tracing::info!(
+        "[ocr] total command time {}ms (engine={}, regions={}, payload={} bytes, source=frontend)",
+        command_start.elapsed().as_millis(),
+        run_result.engine,
+        run_result.region_count,
+        payload_bytes
+    );
+
+    Ok(run_result.texts)
+}
+
+#[tauri::command]
+pub async fn cache_ocr_image(app: AppHandle, image_png: Vec<u8>) -> CommandResult<()> {
+    let state = app.state::<AppState>();
+
+    let decode_start = Instant::now();
+    let decoded = image::load_from_memory(&image_png).context("Failed to decode cached OCR image")?;
+    let decode_elapsed = decode_start.elapsed();
+    let (width, height) = decoded.dimensions();
+
+    {
+        let mut cache = state.ocr_image_cache.write().await;
+        *cache = Some(Arc::new(decoded));
     }
-    
-    // Fallback to manga-ocr
-    if let Some(manga_ocr) = state.manga_ocr.lock().await.as_mut() {
-        match (|| {
-            let img = image::load_from_memory(&image).context("Failed to load image")?;
-            let text = manga_ocr.inference(&img)?;
-            Ok::<Vec<String>, anyhow::Error>(vec![text])
-        })() {
-            Ok(result) => {
-                tracing::info!("Successfully used manga-ocr fallback");
-                Ok(result)
-            },
-            Err(e) => {
-                Err(anyhow!("Both OCR engines failed. PaddleOcrPipeline: {}. Manga-ocr: {}", 
-                    pipelines.get(&active_key).map(|_| "failed").unwrap_or("not available"), e).into())
-            }
-        }
+
+    tracing::info!(
+        "[ocr-cache] primed image cache in {}ms ({} bytes, dimensions={}x{})",
+        decode_elapsed.as_millis(),
+        image_png.len(),
+        width,
+        height
+    );
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn clear_ocr_cache(app: AppHandle) -> CommandResult<()> {
+    let state = app.state::<AppState>();
+
+    let mut cache = state.ocr_image_cache.write().await;
+    if cache.is_some() {
+        *cache = None;
+        tracing::info!("[ocr-cache] cleared image cache");
     } else {
-        Err(anyhow!("No OCR engines available. PaddleOcrPipeline not found and manga-ocr not initialized.").into())
+        tracing::debug!("[ocr-cache] clear requested but cache already empty");
     }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ocr_cached_block(app: AppHandle, bbox: BBox) -> CommandResult<Vec<String>> {
+    let state = app.state::<AppState>();
+    let command_start = Instant::now();
+
+    let image_arc = {
+        let guard = state.ocr_image_cache.read().await;
+        guard
+            .clone()
+            .ok_or_else(|| anyhow!("No cached OCR image. Call cache_ocr_image first."))?
+    };
+
+    let (image_width, image_height) = image_arc.dimensions();
+
+    let crop_start = Instant::now();
+    let xmin_f = bbox.xmin.floor().max(0.0);
+    let ymin_f = bbox.ymin.floor().max(0.0);
+    let xmax_f = bbox.xmax.ceil().min(image_width as f32);
+    let ymax_f = bbox.ymax.ceil().min(image_height as f32);
+
+    if xmax_f <= xmin_f || ymax_f <= ymin_f {
+        return Err(anyhow!(
+            "Invalid bounding box after clamping: [{:.2},{:.2}->{:.2},{:.2}]",
+            xmin_f,
+            ymin_f,
+            xmax_f,
+            ymax_f
+        )
+        .into());
+    }
+
+    let mut width = (xmax_f - xmin_f).ceil().max(1.0) as u32;
+    let mut height = (ymax_f - ymin_f).ceil().max(1.0) as u32;
+
+    let xmin = xmin_f as u32;
+    let ymin = ymin_f as u32;
+
+    if xmin >= image_width || ymin >= image_height {
+        return Err(anyhow!(
+            "Bounding box origin outside image bounds after clamping: ({}, {}) >= ({} ,{})",
+            xmin,
+            ymin,
+            image_width,
+            image_height
+        )
+        .into());
+    }
+
+    let max_width = image_width - xmin;
+    let max_height = image_height - ymin;
+
+    if max_width == 0 || max_height == 0 {
+        return Err(anyhow!("Bounding box collapses to zero area after clamping").into());
+    }
+
+    if width > max_width {
+        width = max_width;
+    }
+    if height > max_height {
+        height = max_height;
+    }
+
+    if width == 0 || height == 0 {
+        return Err(anyhow!("Computed crop dimensions are zero after clamping").into());
+    }
+
+    let cropped = image_arc.crop_imm(xmin, ymin, width, height);
+    let crop_elapsed = crop_start.elapsed();
+
+    let payload_bytes = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|px| px.checked_mul(4))
+        .unwrap_or(0);
+
+    tracing::info!(
+        "[ocr-cache] cropped bbox [{:.1},{:.1}->{:.1},{:.1}] -> {}x{}px in {}ms",
+        bbox.xmin,
+        bbox.ymin,
+        bbox.xmax,
+        bbox.ymax,
+        width,
+        height,
+        crop_elapsed.as_millis()
+    );
+
+    let active_key = state.active_ocr.read().await.clone();
+    let run_result = run_ocr_with_pipelines(&state, &active_key, &cropped, payload_bytes).await?;
+
+    tracing::info!(
+        "[ocr] total command time {}ms (engine={}, regions={}, payload={} bytes, source=cache)",
+        command_start.elapsed().as_millis(),
+        run_result.engine,
+        run_result.region_count,
+        payload_bytes
+    );
+
+    Ok(run_result.texts)
 }
 
 #[tauri::command]

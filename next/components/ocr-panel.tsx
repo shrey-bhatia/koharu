@@ -3,7 +3,7 @@
 import { Play, AlertTriangle, Pencil } from 'lucide-react'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Badge, Button, Callout, TextArea } from '@radix-ui/themes'
-import { crop, imageBitmapToArrayBuffer } from '@/utils/image'
+import { imageBitmapToArrayBuffer } from '@/utils/image'
 import { useEditorStore } from '@/lib/state'
 import { invoke } from '@tauri-apps/api/core'
 
@@ -62,21 +62,48 @@ export default function OCRPanel() {
     finishEditing()
 
     setLoading(true)
+    let cachePrimed = false
+    let cacheDuration = 0
+
     try {
+      const runId = Math.floor(performance.now())
+      const totalStart = performance.now()
+
+      const cacheStart = performance.now()
+      const imageBuffer = await imageBitmapToArrayBuffer(image.bitmap)
+      await invoke('cache_ocr_image', {
+        imagePng: Array.from(new Uint8Array(imageBuffer)),
+      })
+      cachePrimed = true
+      cacheDuration = performance.now() - cacheStart
+      console.info(
+        `[ocr] run=${runId} cachePrime=${cacheDuration.toFixed(1)}ms payload=${(imageBuffer.byteLength / 1024).toFixed(1)}KB`
+      )
+
+      const prepareTimings: number[] = []
+      const invokeTimings: number[] = []
+      const updateTimings: number[] = []
+      const pixelAreas: number[] = []
       const updatedBlocks = []
-      for (const block of textBlocks) {
-        const { xmin, ymin, xmax, ymax } = block
-        const croppedBitmap = await crop(
-          image.bitmap,
-          Math.floor(xmin),
-          Math.floor(ymin),
-          Math.floor(xmax - xmin),
-          Math.floor(ymax - ymin)
-        )
-        const croppedBuffer = await imageBitmapToArrayBuffer(croppedBitmap)
-        const ocrResults = await invoke<string[]>('ocr', {
-          image: Array.from(new Uint8Array(croppedBuffer)),
-        })
+
+      for (const [index, block] of textBlocks.entries()) {
+        const prepareStart = performance.now()
+        const bbox = {
+          xmin: block.xmin,
+          ymin: block.ymin,
+          xmax: block.xmax,
+          ymax: block.ymax,
+        }
+        const blockWidth = Math.max(0, block.xmax - block.xmin)
+        const blockHeight = Math.max(0, block.ymax - block.ymin)
+        const pixelArea = Math.max(1, Math.round(blockWidth * blockHeight))
+        const prepareDuration = performance.now() - prepareStart
+
+        const invokeStart = performance.now()
+        const ocrResults = await invoke<string[]>('ocr_cached_block', { bbox })
+        const invokeDuration = performance.now() - invokeStart
+
+        const updateStart = performance.now()
         const result = ocrResults.length > 0 ? ocrResults[0] : ''
         updatedBlocks.push({
           ...block,
@@ -85,11 +112,41 @@ export default function OCRPanel() {
           manuallyEditedText: false,
           ocrStale: false,
         })
+        const updateDuration = performance.now() - updateStart
+
+        prepareTimings.push(prepareDuration)
+        invokeTimings.push(invokeDuration)
+        updateTimings.push(updateDuration)
+        pixelAreas.push(pixelArea)
+
+        console.info(
+          `[ocr] run=${runId} block=${index + 1}/${textBlocks.length} prepare=${prepareDuration.toFixed(1)}ms area=${pixelArea}px invoke=${invokeDuration.toFixed(1)}ms update=${updateDuration.toFixed(1)}ms`
+        )
       }
+
       setTextBlocks(updatedBlocks)
+
+      const totalDuration = performance.now() - totalStart
+      const blocksCount = textBlocks.length || 1
+      const avg = (values: number[]) => values.reduce((sum, v) => sum + v, 0) / blocksCount
+      const maxArea = Math.max(...pixelAreas)
+      const minArea = Math.min(...pixelAreas)
+
+      console.info(
+        `[ocr] run=${runId} summary total=${totalDuration.toFixed(1)}ms avg=${(totalDuration / blocksCount).toFixed(1)}ms ` +
+          `cachePrime=${cacheDuration.toFixed(1)}ms prepareAvg=${avg(prepareTimings).toFixed(1)}ms invokeAvg=${avg(invokeTimings).toFixed(1)}ms updateAvg=${avg(updateTimings).toFixed(1)}ms ` +
+          `areaAvg=${avg(pixelAreas).toFixed(1)}px areaRange=${minArea}-${maxArea}px`
+      )
     } catch (error) {
       console.error('Error during OCR:', error)
     } finally {
+      if (cachePrimed) {
+        try {
+          await invoke('clear_ocr_cache')
+        } catch (cacheError) {
+          console.warn('Failed to clear OCR cache', cacheError)
+        }
+      }
       setLoading(false)
     }
   }, [finishEditing, image, textBlocks, setTextBlocks])

@@ -450,7 +450,7 @@ export default function SettingsDialog() {
                     value={ocrEngine}
                     onValueChange={(value: 'manga-ocr' | 'paddle-ocr') => {
                       setOcrEngine(value);
-                      invoke('set_ocr_engine', { engine: value });
+                      invoke('set_active_ocr', { modelKey: value });
                     }}
                   >
                     <Select.Trigger className='w-full' />

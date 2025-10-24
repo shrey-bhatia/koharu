@@ -25,6 +25,7 @@ use crate::state::{AppState, GpuInitResult};
 use crate::commands::{
     detection,
     ocr,
+    set_active_ocr,
     get_system_fonts,
     inpaint_region,
     cache_inpainting_data,
@@ -37,6 +38,9 @@ use crate::commands::{
     translate_with_deepl,
     translate_with_ollama,
     render_and_export_image,
+    cache_ocr_image,
+    clear_ocr_cache,
+    ocr_cached_block,
 };
 
 // Read GPU preference from config file
@@ -298,6 +302,7 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
         active_ocr: RwLock::new("default".to_string()),
         inpaint_image_cache: RwLock::new(None),
         inpaint_mask_cache: RwLock::new(None),
+        ocr_image_cache: RwLock::new(None),
     });
 
     app.get_webview_window("splashscreen").unwrap().close()?;
@@ -333,6 +338,7 @@ pub fn run() -> anyhow::Result<()> {
         .invoke_handler(tauri::generate_handler![
             detection,
             ocr,
+            set_active_ocr,
             get_system_fonts,
             inpaint_region,
             cache_inpainting_data,
@@ -344,7 +350,10 @@ pub fn run() -> anyhow::Result<()> {
             run_gpu_stress_test,
             translate_with_deepl,
             translate_with_ollama,
-            render_and_export_image
+            render_and_export_image,
+            cache_ocr_image,
+            clear_ocr_cache,
+            ocr_cached_block
         ])
         .run(tauri::generate_context!())?;
 
