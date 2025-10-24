@@ -202,6 +202,18 @@ const loadSelectionSensitivity = (): number => {
   return Math.min(Math.max(parsed, 10), 40)
 }
 
+// Load zoom performance optimizations preference
+const loadZoomOptimizations = (): boolean => {
+  if (typeof window === 'undefined') return true // Default enabled
+  return localStorage.getItem('zoom_optimizations') !== 'false'
+}
+
+// Load zoom performance metrics collection preference
+const loadZoomMetrics = (): boolean => {
+  if (typeof window === 'undefined') return false
+  return localStorage.getItem('zoom_metrics') === 'true'
+}
+
 type SidebarPersistenceState = {
   sidebarWidth: number
   lastExpandedSidebarWidth: number
@@ -292,6 +304,8 @@ export const useEditorStore = create(
       sidebarWidth: initialSidebarState.sidebarWidth,
       lastExpandedSidebarWidth: initialSidebarState.lastExpandedSidebarWidth,
       isSidebarCollapsed: initialSidebarState.isSidebarCollapsed,
+      zoomOptimizationsEnabled: loadZoomOptimizations(),
+      zoomMetricsEnabled: loadZoomMetrics(),
     } as {
       image: Image | null
       tool: string
@@ -329,6 +343,8 @@ export const useEditorStore = create(
       sidebarWidth: number
       lastExpandedSidebarWidth: number
       isSidebarCollapsed: boolean
+      zoomOptimizationsEnabled: boolean
+      zoomMetricsEnabled: boolean
     },
     (set) => ({
       setImage: (image: Image | null) => set((state) => {
@@ -518,6 +534,18 @@ export const useEditorStore = create(
           }
           return { isSidebarCollapsed: collapsed }
         }),
+      setZoomOptimizations: (enabled: boolean) => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('zoom_optimizations', String(enabled))
+        }
+        set({ zoomOptimizationsEnabled: enabled })
+      },
+      setZoomMetrics: (enabled: boolean) => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('zoom_metrics', String(enabled))
+        }
+        set({ zoomMetricsEnabled: enabled })
+      },
     })
   )
 )
