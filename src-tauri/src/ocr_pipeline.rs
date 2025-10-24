@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
-use image::DynamicImage;
+use image::{DynamicImage, GenericImageView};
 use ort::{session::Session, value::Tensor};
 use crate::model_package::ModelPackage;
 use crate::accuracy::AccuracyMetrics;
 use std::sync::Arc;
 use std::path::Path;
-use std::collections::HashMap;
 use tokio::sync::Mutex;
 use ndarray::Array4;
+use manga_ocr::MangaOCR;
 
 #[derive(Debug, Clone)]
 pub struct TextRegion {
@@ -22,6 +22,9 @@ pub enum DeviceConfig {
     Cpu,
     Cuda,
 }
+
+pub const PADDLE_OCR_KEY: &str = "paddle-ocr";
+pub const MANGA_OCR_KEY: &str = "manga-ocr";
 
 #[derive(Debug)]
 pub struct PaddleOcrPipeline {
@@ -286,6 +289,24 @@ impl PaddleOcrPipeline {
 
 }
 
+    pub struct MangaOcrPipeline {
+        inner: Mutex<MangaOCR>,
+    }
+
+    impl MangaOcrPipeline {
+        pub fn new(instance: MangaOCR) -> Self {
+            Self {
+                inner: Mutex::new(instance),
+            }
+        }
+    }
+
+    impl std::fmt::Debug for MangaOcrPipeline {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("MangaOcrPipeline").finish_non_exhaustive()
+        }
+    }
+
 #[async_trait::async_trait]
 pub trait OcrPipeline: Send + Sync + std::fmt::Debug {
     async fn detect_text_regions(&self, image: &DynamicImage) -> Result<Vec<TextRegion>>;
@@ -301,5 +322,25 @@ impl OcrPipeline for PaddleOcrPipeline {
     async fn recognize_text(&self, image: &DynamicImage, regions: &[TextRegion]) -> Result<Vec<String>> {
         let results = self.recognize_text(image, regions).await?;
         Ok(results.into_iter().map(|r| r.text).collect())
+    }
+}
+
+#[async_trait::async_trait]
+impl OcrPipeline for MangaOcrPipeline {
+    async fn detect_text_regions(&self, image: &DynamicImage) -> Result<Vec<TextRegion>> {
+        let (width, height) = image.dimensions();
+        Ok(vec![TextRegion {
+            bbox: [0.0, 0.0, width as f32, height as f32],
+            confidence: 1.0,
+            text: String::new(),
+            angle: None,
+        }])
+    }
+
+    async fn recognize_text(&self, image: &DynamicImage, regions: &[TextRegion]) -> Result<Vec<String>> {
+        let mut guard = self.inner.lock().await;
+        // MangaOCR operates on the full image crop that caller already prepared.
+        let text = guard.inference(image)?;
+        Ok(regions.iter().map(|_| text.clone()).collect())
     }
 }

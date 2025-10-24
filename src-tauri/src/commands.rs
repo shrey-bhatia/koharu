@@ -10,6 +10,7 @@ use reqwest;
 use serde::{Deserialize, Serialize};
 
 use crate::{AppState, error::CommandResult};
+use crate::ocr_pipeline::{OcrPipeline, MANGA_OCR_KEY};
 use crate::text_renderer::{render_text_on_image, TextBlock};
 
 #[derive(Serialize)]
@@ -21,10 +22,44 @@ pub struct DetectionResult {
     pub mask_height: u32,
 }
 
+#[derive(Serialize)]
 struct OcrRunResult {
     texts: Vec<String>,
-    engine: &'static str,
+    engine: String,
     region_count: usize,
+}
+
+async fn execute_ocr_pipeline(
+    pipeline: Arc<dyn OcrPipeline + Send + Sync>,
+    key: &str,
+    image: &DynamicImage,
+    payload_bytes: usize,
+) -> anyhow::Result<OcrRunResult> {
+    let detect_start = Instant::now();
+    let regions = pipeline.detect_text_regions(image).await?;
+    let detect_elapsed = detect_start.elapsed();
+    tracing::info!(
+        "[ocr:{}] detect_text_regions took {}ms ({} region(s), payload={} bytes)",
+        key,
+        detect_elapsed.as_millis(),
+        regions.len(),
+        payload_bytes
+    );
+
+    let recognize_start = Instant::now();
+    let recognized = pipeline.recognize_text(image, &regions).await?;
+    let recognize_elapsed = recognize_start.elapsed();
+    tracing::info!(
+        "[ocr:{}] recognize_text took {}ms",
+        key,
+        recognize_elapsed.as_millis()
+    );
+
+    Ok(OcrRunResult {
+        texts: recognized,
+        engine: key.to_string(),
+        region_count: regions.len(),
+    })
 }
 
 async fn run_ocr_with_pipelines(
@@ -38,64 +73,44 @@ async fn run_ocr_with_pipelines(
         guard.get(active_key).cloned()
     };
 
-    if let Some(pipeline) = pipeline {
-        match async {
-            let detect_start = Instant::now();
-            let regions = pipeline.detect_text_regions(image).await?;
-            let detect_elapsed = detect_start.elapsed();
-            tracing::info!(
-                "[ocr:paddle] detect_text_regions took {}ms ({} region(s), payload={} bytes)",
-                detect_elapsed.as_millis(),
-                regions.len(),
-                payload_bytes
-            );
-
-            let recognize_start = Instant::now();
-            let recognized = pipeline.recognize_text(image, &regions).await?;
-            let recognize_elapsed = recognize_start.elapsed();
-            tracing::info!(
-                "[ocr:paddle] recognize_text took {}ms",
-                recognize_elapsed.as_millis()
-            );
-
-            Ok::<OcrRunResult, anyhow::Error>(OcrRunResult {
-                texts: recognized,
-                engine: "paddle",
-                region_count: regions.len(),
-            })
+    let pipeline = match pipeline {
+        Some(p) => p,
+        None => {
+            let available: Vec<String> = {
+                let guard = state.ocr_pipelines.read().await;
+                guard.keys().cloned().collect()
+            };
+            return Err(anyhow!(
+                "OCR pipeline '{}' not found. Available engines: {:?}",
+                active_key,
+                available
+            ));
         }
-        .await
-        {
-            Ok(result) => return Ok(result),
-            Err(err) => {
-                tracing::warn!(
-                    "PaddleOcrPipeline failed for key '{}': {}. Falling back to manga-ocr.",
-                    active_key,
-                    err
-                );
+    };
+
+    match execute_ocr_pipeline(pipeline, active_key, image, payload_bytes).await {
+        Ok(result) => Ok(result),
+        Err(err) => {
+            tracing::warn!(
+                "OCR pipeline '{}' failed: {}",
+                active_key,
+                err
+            );
+
+            if active_key != MANGA_OCR_KEY {
+                if let Some(fallback) = {
+                    let guard = state.ocr_pipelines.read().await;
+                    guard.get(MANGA_OCR_KEY).cloned()
+                } {
+                    tracing::warn!("Falling back to '{}' pipeline", MANGA_OCR_KEY);
+                    execute_ocr_pipeline(fallback, MANGA_OCR_KEY, image, payload_bytes).await
+                } else {
+                    Err(err)
+                }
+            } else {
+                Err(err)
             }
         }
-    }
-
-    let mut manga_guard = state.manga_ocr.lock().await;
-    if let Some(manga_ocr) = manga_guard.as_mut() {
-        let inference_start = Instant::now();
-        let text = manga_ocr.inference(image)?;
-        let inference_elapsed = inference_start.elapsed();
-        tracing::info!(
-            "[ocr:manga-ocr] inference took {}ms (payload={} bytes)",
-            inference_elapsed.as_millis(),
-            payload_bytes
-        );
-        Ok(OcrRunResult {
-            texts: vec![text],
-            engine: "manga-ocr",
-            region_count: 1,
-        })
-    } else {
-        Err(anyhow!(
-            "No OCR engines available. PaddleOcrPipeline not found and manga-ocr not initialized."
-        ))
     }
 }
 
@@ -339,10 +354,19 @@ pub async fn set_active_ocr(app: AppHandle, model_key: String) -> CommandResult<
     let pipelines = state.ocr_pipelines.read().await;
     
     if !pipelines.contains_key(&model_key) {
-        return Err(anyhow!("OCR model not found: {}", model_key).into());
+        let available: Vec<String> = pipelines.keys().cloned().collect();
+        return Err(anyhow!(
+            "OCR model '{}' not found. Available engines: {:?}",
+            model_key,
+            available
+        )
+        .into());
     }
-    
-    *state.active_ocr.write().await = model_key;
+
+    drop(pipelines);
+
+    *state.active_ocr.write().await = model_key.clone();
+    tracing::info!("Switched active OCR engine to '{}'", model_key);
     Ok(())
 }
 
