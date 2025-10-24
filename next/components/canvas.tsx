@@ -18,6 +18,10 @@ import { useEditorStore } from '@/lib/state'
 import type { TextBlock } from '@/lib/state'
 import { useZoomPerformance } from '@/utils/zoom-performance'
 
+type BlockPointerOptions = {
+  suppressAutoDrag?: boolean
+}
+
 const generateBlockId = (): string => {
   const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined
 
@@ -448,7 +452,12 @@ function Canvas() {
   }, [handleWheel, handleKeyDown])
 
   const handleBlockPointerDown = useCallback(
-    (event: KonvaEventObject<Event>, block: TextBlock, index: number) => {
+    (
+      event: KonvaEventObject<Event>,
+      block: TextBlock,
+      index: number,
+      options?: BlockPointerOptions
+    ) => {
       lockStage(true)
       stageRef.current?.stopDrag()
       if (stageRef.current) {
@@ -484,7 +493,14 @@ function Canvas() {
         ? potentialGroup
         : (event.target as Konva.Node | null)
 
-      if (dragNode && typeof (dragNode as any).startDrag === 'function') {
+      const isTransformerChild = Boolean(
+        (event.target as Konva.Node | null)?.getParent?.()?.getClassName?.() === 'Transformer'
+      )
+      const shouldAutoDrag = !(
+        options?.suppressAutoDrag || isTransformerChild
+      )
+
+      if (shouldAutoDrag && dragNode && typeof (dragNode as any).startDrag === 'function') {
         const wasDraggable = dragNode.draggable()
         if (!wasDraggable) {
           dragNode.draggable(true)
@@ -859,13 +875,17 @@ function Canvas() {
                           lockStage(false)
                         }}
                         onTransformStart={(e) => {
-                          handleBlockPointerDown(e, block, index)
+                          handleBlockPointerDown(e, block, index, { suppressAutoDrag: true })
                           lockStage(true)
                         }}
                         onTransformEnd={(e) => {
                           e.cancelBubble = true
                           handleTransformEnd(block, index, e)
                           isBlockDraggingRef.current = false
+                          if (stageRef.current && stageDraggablePrevRef.current !== null) {
+                            stageRef.current.draggable(stageDraggablePrevRef.current)
+                          }
+                          stageDraggablePrevRef.current = null
                           lockStage(false)
                         }}
                       >
