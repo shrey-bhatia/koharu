@@ -1,4 +1,5 @@
 use comic_text_detector::ComicTextDetector;
+use image::{DynamicImage, GrayImage};
 use lama::Lama;
 use manga_ocr::MangaOCR;
 use tokio::sync::{Mutex, RwLock};
@@ -26,4 +27,6 @@ pub struct AppState {
     pub gpu_init_result: Mutex<GpuInitResult>,
     pub ocr_pipelines: RwLock<HashMap<String, Arc<dyn OcrPipeline + Send + Sync>>>,
     pub active_ocr: RwLock<String>,
+    pub inpaint_image_cache: RwLock<Option<Arc<DynamicImage>>>,
+    pub inpaint_mask_cache: RwLock<Option<Arc<GrayImage>>>,
 }

@@ -32,6 +32,18 @@ export async function imageBitmapToArrayBuffer(
   return await blob.arrayBuffer()
 }
 
+export async function imageBitmapToRgbaUint8(
+  bitmap: ImageBitmap
+): Promise<Uint8Array> {
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Failed to get canvas context')
+
+  ctx.drawImage(bitmap, 0, 0)
+  const imageData = ctx.getImageData(0, 0, bitmap.width, bitmap.height)
+  return new Uint8Array(imageData.data)
+}
+
 /**
  * Convert segmentation mask (grayscale array) to PNG ArrayBuffer
  * for sending to inpainting backend
@@ -58,6 +70,13 @@ export async function maskToArrayBuffer(
   ctx.putImageData(imageData, 0, 0)
   const blob = await canvas.convertToBlob({ type: 'image/png' })
   return await blob.arrayBuffer()
+}
+
+export function maskToUint8Array(mask: ArrayLike<number>): Uint8Array {
+  if (mask instanceof Uint8Array) {
+    return mask
+  }
+  return Uint8Array.from(mask)
 }
 
 interface SegmentationMaskBitmapOptions {

@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Play } from 'lucide-react'
 import { Button, Slider, Text } from '@radix-ui/themes'
 import { invoke } from '@tauri-apps/api/core'
-import { TextBlock, useEditorStore } from '@/lib/state'
+import { SegmentationMaskInfo, TextBlock, useEditorStore } from '@/lib/state'
 import { analyzeTextAppearance } from '@/utils/appearance-analysis'
 import { createSegmentationMaskBitmap } from '@/utils/image'
 
@@ -42,14 +42,32 @@ export default function DetectionPanel() {
 
       // Store segmentation mask for inpainting
       if (result?.segment) {
-        setSegmentationMask(result.segment)
-        console.log('Segmentation mask stored:', result.segment.length, 'bytes')
+        const maskArray = Uint8Array.from(result.segment)
+        let inferredWidth = Math.round(Math.sqrt(maskArray.length))
+        let inferredHeight = inferredWidth > 0 ? Math.round(maskArray.length / inferredWidth) : 0
+
+        if (inferredWidth * inferredHeight !== maskArray.length) {
+          console.warn('Unexpected segmentation mask dimensions. Falling back to 1024x1024.', maskArray.length)
+          inferredWidth = 1024
+          inferredHeight = 1024
+        }
+
+        const maskInfo: SegmentationMaskInfo = {
+          data: maskArray,
+          width: inferredWidth,
+          height: inferredHeight,
+        }
+
+        setSegmentationMask(maskInfo)
+        console.log('Segmentation mask stored:', maskArray.length, 'bytes')
 
         if (image?.bitmap) {
           try {
-            const maskBitmap = await createSegmentationMaskBitmap(result.segment, {
+            const maskBitmap = await createSegmentationMaskBitmap(maskArray, {
               targetWidth: image.bitmap.width,
               targetHeight: image.bitmap.height,
+              maskWidth: maskInfo.width,
+              maskHeight: maskInfo.height,
               alpha: 160,
             })
             setSegmentationMaskBitmap(maskBitmap)

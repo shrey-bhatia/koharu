@@ -1,8 +1,9 @@
 use anyhow::{Context, anyhow};
 use tauri::{AppHandle, Manager};
 use font_kit::source::SystemSource;
-use image::GenericImageView;
+use image::{DynamicImage, GenericImageView, GrayImage};
 use std::fs;
+use std::sync::Arc;
 use reqwest;
 use serde::{Deserialize, Serialize};
 
@@ -125,7 +126,7 @@ pub fn get_system_fonts() -> CommandResult<Vec<String>> {
     Ok(fonts)
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct BBox {
     pub xmin: f32,
     pub ymin: f32,
@@ -160,110 +161,224 @@ impl Default for InpaintConfig {
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InpaintedRegion {
     pub image: Vec<u8>,
-    pub x: f32,
-    pub y: f32,
+    pub x: u32,
+    pub y: u32,
     pub width: u32,
     pub height: u32,
+    pub mask: Vec<u8>,
+    pub mask_width: u32,
+    pub mask_height: u32,
+    pub padded_bbox: BBox,
 }
 
-#[tauri::command]
-pub async fn inpaint_region(
-    app: AppHandle,
-    image: Vec<u8>,
-    mask: Vec<u8>,
-    bbox: BBox,
-    padding: Option<i32>,       // DEPRECATED: Use config.padding instead
-    debug_mode: Option<bool>,   // DEPRECATED: Use config.debug_mode instead
-    config: Option<InpaintConfig>, // NEW: Full configuration
-) -> CommandResult<InpaintedRegion> {
-    let state = app.state::<AppState>();
+async fn run_inpainting_pipeline(
+    app: &AppHandle,
+    state: &AppState,
+    full_image: &DynamicImage,
+    full_mask: &GrayImage,
+    bbox: &BBox,
+    cfg: &InpaintConfig,
+) -> anyhow::Result<InpaintedRegion> {
+    let (image_width, image_height) = full_image.dimensions();
+    let mask_width = full_mask.width();
+    let mask_height = full_mask.height();
 
-    // Use config if provided, otherwise fall back to legacy parameters for backward compat
-    let cfg = config.unwrap_or_else(|| InpaintConfig {
-        padding: padding.unwrap_or(50),
-        debug_mode: debug_mode.unwrap_or(false),
-        ..Default::default()
-    });
-
-    tracing::info!("inpaint_region called with config: {:?}", cfg);
-
-    // Load images
-    let full_image = image::load_from_memory(&image).context("Failed to load image")?;
-    let full_mask_img = image::load_from_memory(&mask).context("Failed to load mask")?;
-    let full_mask = full_mask_img.to_luma8();
-
-    let (orig_width, orig_height) = full_image.dimensions();
-
-    // Log original dimensions and config
-    tracing::debug!(
-        "inpaint_region: orig={}x{}, mask={}x{}, bbox=[{},{} -> {},{}], config={:?}",
-        orig_width, orig_height,
-        full_mask.width(), full_mask.height(),
-        bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax,
-        cfg
+    tracing::info!(
+        "inpaint pipeline start: config={:?}, image={}x{}, mask={}x{}",
+        cfg,
+        image_width,
+        image_height,
+        mask_width,
+        mask_height
     );
 
-    // Add padding for context (using config)
-    let padded_bbox = BBox {
-        xmin: (bbox.xmin - cfg.padding as f32).max(0.0),
-        ymin: (bbox.ymin - cfg.padding as f32).max(0.0),
-        xmax: (bbox.xmax + cfg.padding as f32).min(orig_width as f32),
-        ymax: (bbox.ymax + cfg.padding as f32).min(orig_height as f32),
-    };
-    
-    // Assert valid bbox
-    if !(padded_bbox.xmax > padded_bbox.xmin && padded_bbox.ymax > padded_bbox.ymin) {
-        return Err(anyhow::anyhow!(
-            "Invalid padded bbox: [{},{} -> {},{}]",
-            padded_bbox.xmin, padded_bbox.ymin, padded_bbox.xmax, padded_bbox.ymax
-        ).into());
+    let padded_min_x = (bbox.xmin - cfg.padding as f32)
+        .floor()
+        .clamp(0.0, image_width.saturating_sub(1) as f32);
+    let padded_min_y = (bbox.ymin - cfg.padding as f32)
+        .floor()
+        .clamp(0.0, image_height.saturating_sub(1) as f32);
+    let padded_max_x = (bbox.xmax + cfg.padding as f32)
+        .ceil()
+        .clamp(0.0, image_width as f32);
+    let padded_max_y = (bbox.ymax + cfg.padding as f32)
+        .ceil()
+        .clamp(0.0, image_height as f32);
+
+    let crop_x = padded_min_x as u32;
+    let crop_y = padded_min_y as u32;
+    let crop_x2 = padded_max_x as u32;
+    let crop_y2 = padded_max_y as u32;
+
+    if !(crop_x2 > crop_x && crop_y2 > crop_y) {
+        anyhow::bail!(
+            "Invalid padded bbox after clamping: [{},{} -> {},{}]",
+            crop_x,
+            crop_y,
+            crop_x2,
+            crop_y2
+        );
     }
 
-    // Crop image region
-    let crop_width = (padded_bbox.xmax - padded_bbox.xmin) as u32;
-    let crop_height = (padded_bbox.ymax - padded_bbox.ymin) as u32;
-    
+    let crop_width = crop_x2 - crop_x;
+    let crop_height = crop_y2 - crop_y;
+
+    let padded_bbox = BBox {
+        xmin: crop_x as f32,
+        ymin: crop_y as f32,
+        xmax: crop_x2 as f32,
+        ymax: crop_y2 as f32,
+    };
+
     tracing::debug!(
         "Padded bbox: [{},{} -> {},{}] = {}x{}px",
-        padded_bbox.xmin, padded_bbox.ymin, padded_bbox.xmax, padded_bbox.ymax,
-        crop_width, crop_height
-    );
-
-    let cropped_image = full_image.crop_imm(
-        padded_bbox.xmin as u32,
-        padded_bbox.ymin as u32,
+        padded_bbox.xmin,
+        padded_bbox.ymin,
+        padded_bbox.xmax,
+        padded_bbox.ymax,
         crop_width,
-        crop_height,
+        crop_height
     );
 
-    // Extract and resize mask to match crop (with config)
+    let cropped_image = full_image.crop_imm(crop_x, crop_y, crop_width, crop_height);
+
+        fn extract_and_resize_mask(
+            full_mask: &GrayImage,
+            bbox: &BBox,
+            orig_width: u32,
+            orig_height: u32,
+            target_width: u32,
+            target_height: u32,
+            config: &InpaintConfig,
+        ) -> anyhow::Result<GrayImage> {
+            let mask_width = full_mask.width();
+            let mask_height = full_mask.height();
+            let scale_x = mask_width as f32 / orig_width as f32;
+            let scale_y = mask_height as f32 / orig_height as f32;
+
+            let mask_xmin = (bbox.xmin * scale_x).floor().max(0.0) as u32;
+            let mask_ymin = (bbox.ymin * scale_y).floor().max(0.0) as u32;
+            let mask_xmax = (bbox.xmax * scale_x).ceil().min(mask_width as f32) as u32;
+            let mask_ymax = (bbox.ymax * scale_y).ceil().min(mask_height as f32) as u32;
+
+            let mask_crop_width = mask_xmax.saturating_sub(mask_xmin);
+            let mask_crop_height = mask_ymax.saturating_sub(mask_ymin);
+
+            tracing::debug!(
+                "Mask extraction: scale=({:.3},{:.3}), mask_bbox=[{},{} -> {},{}], crop={}x{}",
+                scale_x,
+                scale_y,
+                mask_xmin,
+                mask_ymin,
+                mask_xmax,
+                mask_ymax,
+                mask_crop_width,
+                mask_crop_height
+            );
+
+            if mask_crop_width == 0 || mask_crop_height == 0 {
+                return Err(anyhow!(
+                    "Invalid mask crop dimensions: {}x{}",
+                    mask_crop_width,
+                    mask_crop_height
+                ));
+            }
+
+            let mut cropped_mask = GrayImage::new(mask_crop_width, mask_crop_height);
+            for y in 0..mask_crop_height {
+                for x in 0..mask_crop_width {
+                    let px = (mask_xmin + x).min(mask_width - 1);
+                    let py = (mask_ymin + y).min(mask_height - 1);
+                    let pixel = full_mask.get_pixel(px, py);
+                    cropped_mask.put_pixel(x, y, *pixel);
+                }
+            }
+
+            let mut thresholded = cropped_mask.clone();
+            for pixel in thresholded.pixels_mut() {
+                if pixel[0] < config.mask_threshold {
+                    pixel[0] = 0;
+                }
+            }
+
+            let mut morphed = thresholded;
+            if config.mask_dilation > 0 {
+                morphed = dilate_mask(&morphed, config.mask_dilation);
+                tracing::debug!("Applied {}px mask dilation", config.mask_dilation);
+            }
+
+            let mut resized_mask = image::imageops::resize(
+                &morphed,
+                target_width,
+                target_height,
+                image::imageops::FilterType::Nearest,
+            );
+
+            if config.mask_erosion > 0 {
+                resized_mask = erode_mask(&resized_mask, config.mask_erosion);
+                tracing::debug!("Applied {}px mask erosion", config.mask_erosion);
+            }
+
+            tracing::debug!(
+                "Mask resized: {}x{} -> {}x{} (threshold={}, erosion={}px, dilation={}px)",
+                mask_crop_width,
+                mask_crop_height,
+                target_width,
+                target_height,
+                config.mask_threshold,
+                config.mask_erosion,
+                config.mask_dilation
+            );
+
+            Ok(resized_mask)
+        }
+
+        fn dilate_mask(mask: &GrayImage, kernel_size: u32) -> GrayImage {
+            use imageproc::distance_transform::Norm;
+            use imageproc::morphology::dilate;
+
+            dilate(mask, Norm::LInf, kernel_size as u8)
+        }
+
+        fn erode_mask(mask: &GrayImage, kernel_size: u32) -> GrayImage {
+            use imageproc::distance_transform::Norm;
+            use imageproc::morphology::dilate_mut;
+
+            let mut result = mask.clone();
+
+            for pixel in result.pixels_mut() {
+                pixel[0] = 255 - pixel[0];
+            }
+
+            dilate_mut(&mut result, Norm::LInf, kernel_size as u8);
+
+            for pixel in result.pixels_mut() {
+                pixel[0] = 255 - pixel[0];
+            }
+
+            result
+        }
+
     let cropped_mask = extract_and_resize_mask(
-        &full_mask,
+        full_mask,
         &padded_bbox,
-        orig_width,
-        orig_height,
+        image_width,
+        image_height,
         crop_width,
         crop_height,
-        &cfg,
+        cfg,
     )?;
 
-    // Debug: Save triptych if debug mode enabled
     if cfg.debug_mode {
-        save_debug_triptych(
-            &app,
-            &cropped_image,
-            &cropped_mask,
-            &bbox,
-            &padded_bbox,
-        )?;
+        save_debug_triptych(app, &cropped_image, &cropped_mask, bbox, &padded_bbox)?;
     }
 
-    // Run LaMa inference with configurable target size (convert GrayImage to DynamicImage)
-    let mask_dynamic = image::DynamicImage::ImageLuma8(cropped_mask.clone());
-
     tracing::info!("Running LaMa inference with target_size={}", cfg.target_size);
+
+    let mask_dynamic = image::DynamicImage::ImageLuma8(cropped_mask.clone());
 
     let inpainted_crop = state
         .lama
@@ -274,133 +389,194 @@ pub async fn inpaint_region(
 
     tracing::info!("LaMa inference completed successfully");
 
-    // Debug: Save triptych output if debug mode enabled
     if cfg.debug_mode {
-        save_debug_output(
-            &app,
-            &cropped_image,
-            &cropped_mask,
-            &inpainted_crop,
-            &bbox,
-        )?;
+        save_debug_output(app, &cropped_image, &cropped_mask, &inpainted_crop, bbox)?;
     }
 
-    // Encode as PNG
-    let mut png_bytes = Vec::new();
-    inpainted_crop
-        .write_to(
-            &mut std::io::Cursor::new(&mut png_bytes),
-            image::ImageFormat::Png,
-        )
-        .context("Failed to encode PNG")?;
+    let crop_rgba = inpainted_crop.to_rgba8();
+    let output_pixels = crop_rgba.into_raw();
+    let mask_bytes = cropped_mask.into_raw();
 
     Ok(InpaintedRegion {
-        image: png_bytes,
-        x: padded_bbox.xmin,
-        y: padded_bbox.ymin,
+        image: output_pixels,
+        x: crop_x,
+        y: crop_y,
         width: crop_width,
         height: crop_height,
+        mask: mask_bytes,
+        mask_width: crop_width,
+        mask_height: crop_height,
+        padded_bbox,
     })
 }
 
-fn extract_and_resize_mask(
-    full_mask: &image::GrayImage,
-    bbox: &BBox,
-    orig_width: u32,
-    orig_height: u32,
-    target_width: u32,
-    target_height: u32,
-    config: &InpaintConfig,
-) -> anyhow::Result<image::GrayImage> {
-    // Scale factors: original → 1024×1024 mask (assuming mask is 1024x1024)
-    let mask_width = full_mask.width();
-    let mask_height = full_mask.height();
-    let scale_x = mask_width as f32 / orig_width as f32;
-    let scale_y = mask_height as f32 / orig_height as f32;
+#[tauri::command]
+pub async fn cache_inpainting_data(
+    app: AppHandle,
+    image_png: Vec<u8>,
+    mask_png: Vec<u8>,
+) -> CommandResult<()> {
+    let state = app.state::<AppState>();
 
-    // Map bbox to mask coordinates using consistent floor/ceil
-    let mask_xmin = (bbox.xmin * scale_x).floor().max(0.0) as u32;
-    let mask_ymin = (bbox.ymin * scale_y).floor().max(0.0) as u32;
-    let mask_xmax = (bbox.xmax * scale_x).ceil().min(mask_width as f32) as u32;
-    let mask_ymax = (bbox.ymax * scale_y).ceil().min(mask_height as f32) as u32;
+    let decoded_image = image::load_from_memory(&image_png)
+        .context("Failed to decode cached inpaint image")?;
+    let decoded_mask = image::load_from_memory(&mask_png)
+        .context("Failed to decode cached inpaint mask")?
+        .to_luma8();
 
-    let mask_crop_width = mask_xmax.saturating_sub(mask_xmin);
-    let mask_crop_height = mask_ymax.saturating_sub(mask_ymin);
-    
-    tracing::debug!(
-        "Mask extraction: scale=({:.3},{:.3}), mask_bbox=[{},{} -> {},{}], crop={}x{}",
-        scale_x, scale_y,
-        mask_xmin, mask_ymin, mask_xmax, mask_ymax,
-        mask_crop_width, mask_crop_height
-    );
-    
-    if mask_crop_width == 0 || mask_crop_height == 0 {
-        return Err(anyhow::anyhow!(
-            "Invalid mask crop dimensions: {}x{}",
-            mask_crop_width, mask_crop_height
-        ));
+    {
+        let mut image_cache = state.inpaint_image_cache.write().await;
+        *image_cache = Some(Arc::new(decoded_image));
     }
 
-    // Crop mask with bounds checking
-    let mut cropped_mask = image::GrayImage::new(mask_crop_width, mask_crop_height);
-    for y in 0..mask_crop_height {
-        for x in 0..mask_crop_width {
-            let px = (mask_xmin + x).min(mask_width - 1);
-            let py = (mask_ymin + y).min(mask_height - 1);
-            let pixel = full_mask.get_pixel(px, py);
-            cropped_mask.put_pixel(x, y, *pixel);
-        }
+    {
+        let mut mask_cache = state.inpaint_mask_cache.write().await;
+        *mask_cache = Some(Arc::new(decoded_mask));
     }
 
-    // Apply threshold to binarize mask (configurable)
-    let mut thresholded = cropped_mask.clone();
-    for pixel in thresholded.pixels_mut() {
-        if pixel[0] < config.mask_threshold {
-            pixel[0] = 0;
-        }
-    }
+    tracing::info!("Inpainting cache primed with image and mask data");
 
-    // Optional dilation (fills gaps in text strokes)
-    let mut morphed = thresholded;
-    if config.mask_dilation > 0 {
-        morphed = dilate_mask(&morphed, config.mask_dilation);
-        tracing::debug!("Applied {}px mask dilation", config.mask_dilation);
-    }
-
-    // Resize to match image crop using NEAREST for masks (CRITICAL: no interpolation)
-    let mut resized_mask = image::imageops::resize(
-        &morphed,
-        target_width,
-        target_height,
-        image::imageops::FilterType::Nearest,
-    );
-
-    // Apply erosion to pull mask away from edges (configurable)
-    if config.mask_erosion > 0 {
-        resized_mask = erode_mask(&resized_mask, config.mask_erosion);
-        tracing::debug!("Applied {}px mask erosion", config.mask_erosion);
-    }
-    
-    tracing::debug!(
-        "Mask resized: {}x{} -> {}x{} (nearest-neighbor, threshold={}, erosion={}px, dilation={}px)",
-        mask_crop_width, mask_crop_height,
-        target_width, target_height,
-        config.mask_threshold,
-        config.mask_erosion,
-        config.mask_dilation
-    );
-
-    Ok(resized_mask)
+    Ok(())
 }
 
-/// Simple dilation: expand white regions by kernel_size pixels
-fn dilate_mask(mask: &image::GrayImage, kernel_size: u32) -> image::GrayImage {
-    use imageproc::morphology::dilate;
-    use imageproc::distance_transform::Norm;
+#[tauri::command]
+pub async fn inpaint_region_cached(
+    app: AppHandle,
+    bbox: BBox,
+    padding: Option<i32>,
+    debug_mode: Option<bool>,
+    config: Option<InpaintConfig>,
+) -> CommandResult<InpaintedRegion> {
+    let state = app.state::<AppState>();
 
-    dilate(mask, Norm::LInf, kernel_size as u8)
+    let mut cfg = config.unwrap_or_default();
+    if let Some(padding) = padding {
+        cfg.padding = padding;
+    }
+    if let Some(debug_mode) = debug_mode {
+        cfg.debug_mode = debug_mode;
+    }
+
+    let image_arc = {
+        let guard = state.inpaint_image_cache.read().await;
+        guard
+            .clone()
+            .ok_or_else(|| anyhow!("No cached image. Call cache_inpainting_data first."))?
+    };
+
+    let mask_arc = {
+        let guard = state.inpaint_mask_cache.read().await;
+        guard
+            .clone()
+            .ok_or_else(|| anyhow!("No cached mask. Call cache_inpainting_data first."))?
+    };
+
+    let result = run_inpainting_pipeline(
+        &app,
+        &state,
+        &image_arc,
+        &mask_arc,
+        &bbox,
+        &cfg,
+    )
+    .await?;
+
+    Ok(result)
 }
 
+#[tauri::command]
+pub async fn clear_inpainting_cache(app: AppHandle) -> CommandResult<()> {
+    let state = app.state::<AppState>();
+
+    {
+        let mut image_cache = state.inpaint_image_cache.write().await;
+        *image_cache = None;
+    }
+
+    {
+        let mut mask_cache = state.inpaint_mask_cache.write().await;
+        *mask_cache = None;
+    }
+
+    tracing::info!("Inpainting cache cleared");
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn inpaint_region(
+    app: AppHandle,
+    image: Vec<u8>,
+    image_width: u32,
+    image_height: u32,
+    mask: Vec<u8>,
+    mask_width: u32,
+    mask_height: u32,
+    bbox: BBox,
+    padding: Option<i32>,       // DEPRECATED: Use config.padding instead
+    debug_mode: Option<bool>,   // DEPRECATED: Use config.debug_mode instead
+    config: Option<InpaintConfig>, // NEW: Full configuration
+) -> CommandResult<InpaintedRegion> {
+    let state = app.state::<AppState>();
+
+    let mut cfg = config.unwrap_or_default();
+    if let Some(padding) = padding {
+        cfg.padding = padding;
+    }
+    if let Some(debug_mode) = debug_mode {
+        cfg.debug_mode = debug_mode;
+    }
+
+    tracing::info!(
+        "inpaint_region (legacy path) with config={:?}, image={}x{}, mask={}x{}",
+        cfg,
+        image_width,
+        image_height,
+        mask_width,
+        mask_height
+    );
+
+    let expected_image_len = (image_width as usize)
+        .checked_mul(image_height as usize)
+        .and_then(|px| px.checked_mul(4))
+        .ok_or_else(|| anyhow!("Image dimensions overflow"))?;
+    if image.len() != expected_image_len {
+        return Err(anyhow!(
+            "Image buffer length mismatch: expected {}, got {}",
+            expected_image_len,
+            image.len()
+        )
+        .into());
+    }
+
+    let expected_mask_len = (mask_width as usize)
+        .checked_mul(mask_height as usize)
+        .ok_or_else(|| anyhow!("Mask dimensions overflow"))?;
+    if mask.len() != expected_mask_len {
+        return Err(anyhow!(
+            "Mask buffer length mismatch: expected {}, got {}",
+            expected_mask_len,
+            mask.len()
+        )
+        .into());
+    }
+
+    let full_image_buffer = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
+        image_width,
+        image_height,
+        image,
+    )
+    .ok_or_else(|| anyhow!("Failed to reconstruct RGBA image buffer"))?;
+    let full_image = DynamicImage::ImageRgba8(full_image_buffer);
+
+    let full_mask_buffer = image::ImageBuffer::<image::Luma<u8>, _>::from_raw(mask_width, mask_height, mask)
+        .ok_or_else(|| anyhow!("Failed to reconstruct mask buffer"))?;
+    let full_mask: GrayImage = full_mask_buffer;
+
+    run_inpainting_pipeline(&app, &state, &full_image, &full_mask, &bbox, &cfg)
+        .await
+        .map_err(Into::into)
+}
 /// Simple erosion: shrink white regions by kernel_size pixels
 fn erode_mask(mask: &image::GrayImage, kernel_size: u32) -> image::GrayImage {
     use imageproc::morphology::dilate_mut;

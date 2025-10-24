@@ -23,9 +23,20 @@ use std::path::PathBuf;
 use crate::ocr_pipeline::{PaddleOcrPipeline, DeviceConfig, OcrPipeline};
 use crate::state::{AppState, GpuInitResult};
 use crate::commands::{
-    detection, ocr, get_system_fonts, inpaint_region, set_gpu_preference,
-    get_gpu_devices, get_current_gpu_status, run_gpu_stress_test,
-    translate_with_deepl, translate_with_ollama, render_and_export_image
+    detection,
+    ocr,
+    get_system_fonts,
+    inpaint_region,
+    cache_inpainting_data,
+    inpaint_region_cached,
+    clear_inpainting_cache,
+    set_gpu_preference,
+    get_gpu_devices,
+    get_current_gpu_status,
+    run_gpu_stress_test,
+    translate_with_deepl,
+    translate_with_ollama,
+    render_and_export_image,
 };
 
 // Read GPU preference from config file
@@ -285,6 +296,8 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
         gpu_init_result: Mutex::new(init_result),
         ocr_pipelines: RwLock::new(ocr_pipelines),
         active_ocr: RwLock::new("default".to_string()),
+        inpaint_image_cache: RwLock::new(None),
+        inpaint_mask_cache: RwLock::new(None),
     });
 
     app.get_webview_window("splashscreen").unwrap().close()?;
@@ -322,6 +335,9 @@ pub fn run() -> anyhow::Result<()> {
             ocr,
             get_system_fonts,
             inpaint_region,
+            cache_inpainting_data,
+            inpaint_region_cached,
+            clear_inpainting_cache,
             set_gpu_preference,
             get_gpu_devices,
             get_current_gpu_status,
