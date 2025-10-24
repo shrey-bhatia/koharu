@@ -67,7 +67,6 @@ export default function RenderPanel() {
   const [error, setError] = useState<string | null>(null)
   const [selectedBlock, setSelectedBlock] = useState<number | null>(null)
   const [gpuStatus, setGpuStatus] = useState<GpuStatus | null>(null)
-  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     loadGpuStatus()
@@ -123,6 +122,25 @@ export default function RenderPanel() {
       // Never use inpainted image for color extraction (it's already white!)
       const colorSourceImage = image.bitmap
 
+      const totalBlocks = textBlocks.length
+      const maxProgressUpdates = 20
+      const progressBatchSize = Math.max(1, Math.floor(totalBlocks / maxProgressUpdates))
+      const minProgressIntervalMs = 120
+      const nowTime = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+      let lastProgressTime = nowTime()
+
+      const updateProgress = (index: number) => {
+        const isLast = index === totalBlocks - 1
+        const isBatchBoundary = (index + 1) % progressBatchSize === 0
+        const currentTime = nowTime()
+        const elapsed = currentTime - lastProgressTime
+
+        if (isLast || isBatchBoundary || elapsed >= minProgressIntervalMs) {
+          setProgress((index + 1) / totalBlocks)
+          lastProgressTime = currentTime
+        }
+      }
+
       // Assertion: Verify we're not accidentally using inpainted image
       if (renderMethod === 'rectangle' && inpaintedImage) {
         console.warn('[SAFETY] Rectangle mode detected with inpainted image. Using ORIGINAL for color sampling (correct).')
@@ -134,7 +152,7 @@ export default function RenderPanel() {
         // Skip blocks without translation
         if (!block.translatedText) {
           updated.push(block)
-          setProgress((i + 1) / textBlocks.length)
+          updateProgress(i)
           continue
         }
 
@@ -208,9 +226,10 @@ export default function RenderPanel() {
           fontFamily: fontToUse,
         })
 
-        setProgress((i + 1) / textBlocks.length)
+        updateProgress(i)
       }
 
+      setProgress(1)
       setTextBlocks(updated)
 
       // Generate final composition and save as pipeline stage
@@ -231,7 +250,6 @@ export default function RenderPanel() {
 
   const exportImage = async () => {
     try {
-      setExporting(true)
       setError(null)
 
       if (!image) return
@@ -350,8 +368,6 @@ export default function RenderPanel() {
     } catch (err) {
       console.error('[EXPORT] Error:', err)
       setError(err instanceof Error ? err.message : 'Failed to export image')
-    } finally {
-      setExporting(false)
     }
   }
 
@@ -705,7 +721,7 @@ export default function RenderPanel() {
                       </span>
                     </button>
                     {selectedBlock === i && (
-                      <RenderCustomization blockIndex={i} onReProcess={processColors} />
+                      <RenderCustomization blockIndex={i} />
                     )}
                   </div>
                 )
@@ -723,9 +739,9 @@ export default function RenderPanel() {
                 <li>Run Detection to find text</li>
                 <li>Run OCR to extract Japanese</li>
                 <li>Run Translation to get English</li>
-                <li>Click "Process" to calculate colors/fonts</li>
+                <li>Click &quot;Process&quot; to calculate colors/fonts</li>
                 <li>Customize individual blocks if needed</li>
-                <li>Click "Export" to save final image</li>
+                <li>Click &quot;Export&quot; to save final image</li>
               </ol>
             </Callout.Text>
           </Callout.Root>

@@ -1,7 +1,7 @@
 'use client'
 
 import { Play, AlertTriangle, Pencil } from 'lucide-react'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Badge, Button, Callout, TextArea } from '@radix-ui/themes'
 import { crop, imageBitmapToArrayBuffer } from '@/utils/image'
 import { useEditorStore } from '@/lib/state'
@@ -24,25 +24,28 @@ export default function OCRPanel() {
   const staleCount = textBlocks.filter((b) => b.ocrStale).length
   const manualEditsCount = textBlocks.filter((b) => b.manuallyEditedText).length
 
-  const persistManualEdit = (index: number, value: string, sourceBlocks?: typeof textBlocks) => {
-    const blocksSnapshot = sourceBlocks ?? textBlocks
-    const updated = [...blocksSnapshot]
-    const block = updated[index]
-    if (!block) return
+  const persistManualEdit = useCallback(
+    (index: number, value: string, sourceBlocks?: typeof textBlocks) => {
+      const blocksSnapshot = sourceBlocks ?? textBlocks
+      const updated = [...blocksSnapshot]
+      const block = updated[index]
+      if (!block) return
 
-    const changed = block.text !== value
+      const changed = block.text !== value
 
-    updated[index] = {
-      ...block,
-      text: value,
-      manuallyEditedText: changed ? true : block.manuallyEditedText,
-      translatedText: changed ? undefined : block.translatedText,
-      ocrStale: false,
-    }
-    setTextBlocks(updated)
-  }
+      updated[index] = {
+        ...block,
+        text: value,
+        manuallyEditedText: changed ? true : block.manuallyEditedText,
+        translatedText: changed ? undefined : block.translatedText,
+        ocrStale: false,
+      }
+      setTextBlocks(updated)
+    },
+    [textBlocks, setTextBlocks]
+  )
 
-  const finishEditing = () => {
+  const finishEditing = useCallback(() => {
     if (editingBlock !== null) {
       if (autosaveTimeoutRef.current) {
         clearTimeout(autosaveTimeoutRef.current)
@@ -51,9 +54,9 @@ export default function OCRPanel() {
     }
     setEditingBlock(null)
     setEditValue('')
-  }
+  }, [editingBlock, editValue, persistManualEdit])
 
-  const run = async () => {
+  const run = useCallback(async () => {
     if (!image || !textBlocks.length) return
 
     finishEditing()
@@ -89,7 +92,7 @@ export default function OCRPanel() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [finishEditing, image, textBlocks, setTextBlocks])
 
   // Auto-trigger OCR when boxes become stale (with debounce)
   useEffect(() => {
@@ -113,7 +116,7 @@ export default function OCRPanel() {
         clearTimeout(autoOcrTimeoutRef.current)
       }
     }
-  }, [staleCount, loading, editingBlock])
+  }, [staleCount, loading, editingBlock, run])
 
   // Cleanup autosave timer on unmount
   useEffect(() => {
@@ -141,9 +144,9 @@ export default function OCRPanel() {
         persistManualEdit(index, value, latestBlocksRef.current)
       }
     }
-  }, [])
+  }, [persistManualEdit])
 
-  const handleEditChange = (index: number, value: string) => {
+  const handleEditChange = useCallback((index: number, value: string) => {
     setEditValue(value)
 
     if (autosaveTimeoutRef.current) {
@@ -153,9 +156,9 @@ export default function OCRPanel() {
     autosaveTimeoutRef.current = setTimeout(() => {
       persistManualEdit(index, value)
     }, 400)
-  }
+  }, [persistManualEdit])
 
-  const startEditing = (index: number) => {
+  const startEditing = useCallback((index: number) => {
     if (editingBlock !== null && editingBlock !== index) {
       finishEditing()
     }
@@ -165,7 +168,7 @@ export default function OCRPanel() {
     setEditingBlock(index)
     setEditValue(textBlocks[index]?.text || '')
     setSelectedBlockIndex(index)
-  }
+  }, [editingBlock, finishEditing, setSelectedBlockIndex, textBlocks])
 
   return (
     <div className='flex max-h-[600px] w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md dark:border-gray-700 dark:bg-gray-800'>

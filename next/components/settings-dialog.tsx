@@ -374,7 +374,7 @@ export default function SettingsDialog() {
                         <strong>Benefits:</strong> Free, unlimited, runs locally, no API key needed
                       </div>
                       <div className='mt-2 text-blue-700 dark:text-blue-500'>
-                        <strong>Note:</strong> Raw OCR'd Japanese text is sent directly to Ollama. Set up your model and system prompt in Ollama beforehand.
+                        <strong>Note:</strong> Raw OCR&apos;d Japanese text is sent directly to Ollama. Set up your model and system prompt in Ollama beforehand.
                       </div>
                     </>
                   )}
@@ -431,7 +431,7 @@ export default function SettingsDialog() {
               {/* Info about font availability */}
               <Callout.Root size='1'>
                 <Callout.Text>
-                  <strong>Note:</strong> Make sure the selected font supports the languages you're translating to.
+                  <strong>Note:</strong> Make sure the selected font supports the languages you&apos;re translating to.
                   Not all fonts have complete Unicode coverage.
                 </Callout.Text>
               </Callout.Root>
@@ -558,7 +558,7 @@ export default function SettingsDialog() {
                     <ul className='ml-4 list-disc'>
                       <li>Run stress test above - should show &lt;800ms avg for CUDA</li>
                       <li>Check Task Manager → Performance → GPU during inpainting</li>
-                      <li>Look for "possible CPU fallback" warning in status</li>
+                      <li>Look for &quot;possible CPU fallback&quot; warning in status</li>
                     </ul>
                   </div>
                 </div>

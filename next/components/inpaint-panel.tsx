@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Play, AlertCircle, CheckCircle, X } from 'lucide-react'
-import { Button, Text, Callout, Progress } from '@radix-ui/themes'
+import { Button, Callout, Progress } from '@radix-ui/themes'
 import { invoke } from '@tauri-apps/api/core'
 import { useEditorStore } from '@/lib/state'
 import { imageBitmapToArrayBuffer, maskToArrayBuffer } from '@/utils/image'
@@ -40,33 +40,6 @@ export default function InpaintPanel() {
       // Rectangle fill doesn't use AI inpainting
       setError('Rectangle fill is selected. Inpainting is not needed for this mode.')
       return
-    }
-  }
-
-  const runFullInpainting = async () => {
-    setLoading(true)
-    setError(null)
-    setSuccess(false)
-
-    try {
-      const imageBuffer = await imageBitmapToArrayBuffer(image!.bitmap)
-      const maskBuffer = await maskToArrayBuffer(segmentationMask!)
-
-      const result = await invoke<number[]>('inpaint', {
-        image: Array.from(new Uint8Array(imageBuffer)),
-        mask: Array.from(new Uint8Array(maskBuffer)),
-      })
-
-      const resultBuffer = new Uint8Array(result).buffer
-      const inpainted = await createImageFromBuffer(resultBuffer)
-      setInpaintedImage(inpainted)
-      setPipelineStage('textless', inpainted)
-      setCurrentStage('textless')
-      setSuccess(true)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Inpainting failed')
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -252,7 +225,7 @@ export default function InpaintPanel() {
               <AlertCircle className='h-4 w-4' />
             </Callout.Icon>
             <Callout.Text>
-              Rectangle fill doesn't require AI inpainting. Colors will be extracted during Render.
+              Rectangle fill doesn&apos;t require AI inpainting. Colors will be extracted during Render.
             </Callout.Text>
           </Callout.Root>
         </div>
@@ -312,7 +285,7 @@ export default function InpaintPanel() {
               <CheckCircle className='h-4 w-4' />
             </Callout.Icon>
             <Callout.Text>
-              Text removed successfully! Click "Inpaint" tool to view result.
+              Text removed successfully! Click &quot;Inpaint&quot; tool to view result.
             </Callout.Text>
           </Callout.Root>
         )}

@@ -1,6 +1,6 @@
 'use client'
 
-import { Image, Moon, Sun, Clipboard, ChevronUp, ChevronDown } from 'lucide-react'
+import { Image as ImageIcon, Moon, Sun, Clipboard, ChevronUp, ChevronDown } from 'lucide-react'
 import { Button, IconButton, Badge, Slider } from '@radix-ui/themes'
 import { fileOpen } from 'browser-fs-access'
 import { useEditorStore } from '@/lib/state'
@@ -81,7 +81,7 @@ function Topbar() {
     <div className='flex w-full items-center border-b border-gray-200 bg-white p-2 shadow-sm dark:border-gray-700 dark:bg-gray-900'>
       <div className='mx-1 flex items-center'>
         <Button onClick={handleOpenImage} variant='soft'>
-          <Image size={20} />
+          <ImageIcon size={20} />
         </Button>
         <Button onClick={handlePasteImage} variant='soft'>
           <Clipboard size={20} />

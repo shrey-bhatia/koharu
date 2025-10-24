@@ -1,6 +1,6 @@
 'use client'
 
-import { Badge, Button, Callout, Text, Progress, Code } from '@radix-ui/themes'
+import { Badge, Button, Callout, Text, Code } from '@radix-ui/themes'
 import { CheckCircle, XCircle, AlertTriangle, Zap, RefreshCw } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { useState, useEffect } from 'react'

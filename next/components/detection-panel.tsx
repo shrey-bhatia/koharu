@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Play } from 'lucide-react'
 import { Button, Slider, Text } from '@radix-ui/themes'
 import { invoke } from '@tauri-apps/api/core'
-import { useEditorStore } from '@/lib/state'
+import { TextBlock, useEditorStore } from '@/lib/state'
 import { analyzeTextAppearance } from '@/utils/appearance-analysis'
 import { createSegmentationMaskBitmap } from '@/utils/image'
 
@@ -30,7 +30,7 @@ export default function DetectionPanel() {
 
     try {
       const hadMaskBitmap = Boolean(segmentationMaskBitmap)
-      const result = await invoke<any>('detection', {
+      const result = await invoke<{ bboxes: TextBlock[]; segment?: number[] }>('detection', {
         image: image.buffer,
         confidenceThreshold: confidenceThreshold,
         nmsThreshold: nmsThreshold,
@@ -38,7 +38,7 @@ export default function DetectionPanel() {
 
       console.log('Detection result:', result)
 
-      let blocks = result?.bboxes || []
+  let blocks = result?.bboxes || []
 
       // Store segmentation mask for inpainting
       if (result?.segment) {

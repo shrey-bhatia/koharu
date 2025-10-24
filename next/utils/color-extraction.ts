@@ -12,6 +12,43 @@ export interface ColorResult {
   confidence: number // 0-1, based on color variance
 }
 
+type CachedCanvas = {
+  ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D
+}
+
+const CANVAS_CACHE = new WeakMap<ImageBitmap, CachedCanvas>()
+
+function getOrCreateContext(image: ImageBitmap): CachedCanvas {
+  const cached = CANVAS_CACHE.get(image)
+  if (cached) {
+    return cached
+  }
+
+  if (typeof OffscreenCanvas !== 'undefined') {
+    const canvas = new OffscreenCanvas(image.width, image.height)
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    if (!ctx) throw new Error('Failed to get offscreen canvas context')
+    ctx.drawImage(image, 0, 0)
+    const cacheEntry: CachedCanvas = { ctx }
+    CANVAS_CACHE.set(image, cacheEntry)
+    return cacheEntry
+  }
+
+  if (typeof document !== 'undefined') {
+    const canvas = document.createElement('canvas')
+    canvas.width = image.width
+    canvas.height = image.height
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    if (!ctx) throw new Error('Failed to get canvas context')
+    ctx.drawImage(image, 0, 0)
+    const cacheEntry: CachedCanvas = { ctx }
+    CANVAS_CACHE.set(image, cacheEntry)
+    return cacheEntry
+  }
+
+  throw new Error('No canvas implementation available')
+}
+
 /**
  * Extract background color from border region around text bbox
  *
@@ -29,13 +66,7 @@ export async function extractBackgroundColor(
   textBlock: TextBlock,
   padding: number = 10
 ): Promise<ColorResult> {
-
-  // Create temporary canvas to read pixels
-  const canvas = new OffscreenCanvas(image.width, image.height)
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Failed to get canvas context')
-
-  ctx.drawImage(image, 0, 0)
+  const { ctx } = getOrCreateContext(image)
 
   // Define sampling region (ring around bbox)
   const innerBox = {
@@ -52,39 +83,42 @@ export async function extractBackgroundColor(
     ymax: Math.min(image.height, innerBox.ymax + padding),
   }
 
-  // Sample pixels from border region (ring between inner and outer box)
-  const samples: RGB[] = []
+  const regionWidth = Math.max(0, outerBox.xmax - outerBox.xmin)
+  const regionHeight = Math.max(0, outerBox.ymax - outerBox.ymin)
 
-  // Top edge
-  for (let x = outerBox.xmin; x < outerBox.xmax; x++) {
-    for (let y = outerBox.ymin; y < innerBox.ymin; y++) {
-      samples.push(getPixel(ctx, x, y))
+  if (regionWidth === 0 || regionHeight === 0) {
+    return {
+      backgroundColor: { r: 255, g: 255, b: 255 },
+      textColor: textBlock.class === 0 ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 },
+      confidence: 0,
     }
   }
 
-  // Bottom edge
-  for (let x = outerBox.xmin; x < outerBox.xmax; x++) {
-    for (let y = innerBox.ymax; y < outerBox.ymax; y++) {
-      samples.push(getPixel(ctx, x, y))
+  const imageData = ctx.getImageData(outerBox.xmin, outerBox.ymin, regionWidth, regionHeight)
+  const data = imageData.data
+
+  const rValues: number[] = []
+  const gValues: number[] = []
+  const bValues: number[] = []
+
+  for (let y = 0; y < regionHeight; y++) {
+    const absoluteY = outerBox.ymin + y
+    for (let x = 0; x < regionWidth; x++) {
+      const absoluteX = outerBox.xmin + x
+      const inInnerBox =
+        absoluteX >= innerBox.xmin && absoluteX < innerBox.xmax &&
+        absoluteY >= innerBox.ymin && absoluteY < innerBox.ymax
+
+      if (inInnerBox) continue
+
+      const offset = (y * regionWidth + x) * 4
+      rValues.push(data[offset])
+      gValues.push(data[offset + 1])
+      bValues.push(data[offset + 2])
     }
   }
 
-  // Left edge (excluding corners already sampled)
-  for (let x = outerBox.xmin; x < innerBox.xmin; x++) {
-    for (let y = innerBox.ymin; y < innerBox.ymax; y++) {
-      samples.push(getPixel(ctx, x, y))
-    }
-  }
-
-  // Right edge (excluding corners already sampled)
-  for (let x = innerBox.xmax; x < outerBox.xmax; x++) {
-    for (let y = innerBox.ymin; y < innerBox.ymax; y++) {
-      samples.push(getPixel(ctx, x, y))
-    }
-  }
-
-  // Calculate median color (robust to outliers)
-  const backgroundColor = calculateMedianColor(samples)
+  const backgroundColor = calculateMedianFromChannels(rValues, gValues, bValues)
 
   // Determine text color from detection class
   // class 0 = black text, class 1 = white text
@@ -92,9 +126,8 @@ export async function extractBackgroundColor(
     ? { r: 0, g: 0, b: 0 }
     : { r: 255, g: 255, b: 255 }
 
-  // Calculate confidence based on color variance
-  const variance = calculateColorVariance(samples, backgroundColor)
-  const confidence = Math.exp(-variance / 1000) // Lower variance = higher confidence
+  const variance = calculateChannelVariance(rValues, gValues, bValues, backgroundColor)
+  const confidence = Math.exp(-variance / 1000)
 
   return {
     backgroundColor,
@@ -103,61 +136,44 @@ export async function extractBackgroundColor(
   }
 }
 
-/**
- * Get pixel color at specific coordinate
- */
-function getPixel(
-  ctx: OffscreenCanvasRenderingContext2D,
-  x: number,
-  y: number
-): RGB {
-  const imageData = ctx.getImageData(x, y, 1, 1)
+function calculateMedianFromChannels(rValues: number[], gValues: number[], bValues: number[]): RGB {
+  const length = rValues.length
+  if (length === 0) {
+    return { r: 255, g: 255, b: 255 }
+  }
+
+  const mid = Math.floor(length / 2)
+
+  const sortedR = [...rValues].sort((a, b) => a - b)
+  const sortedG = [...gValues].sort((a, b) => a - b)
+  const sortedB = [...bValues].sort((a, b) => a - b)
+
   return {
-    r: imageData.data[0],
-    g: imageData.data[1],
-    b: imageData.data[2],
+    r: sortedR[mid],
+    g: sortedG[mid],
+    b: sortedB[mid],
   }
 }
 
-/**
- * Calculate median color from samples
- * More robust than mean for manga (screentones, gradients)
- */
-function calculateMedianColor(samples: RGB[]): RGB {
-  if (samples.length === 0) {
-    return { r: 255, g: 255, b: 255 } // Default white
-  }
-
-  // Sort each channel independently
-  const rValues = samples.map(s => s.r).sort((a, b) => a - b)
-  const gValues = samples.map(s => s.g).sort((a, b) => a - b)
-  const bValues = samples.map(s => s.b).sort((a, b) => a - b)
-
-  const mid = Math.floor(samples.length / 2)
-
-  return {
-    r: rValues[mid],
-    g: gValues[mid],
-    b: bValues[mid],
-  }
-}
-
-/**
- * Calculate color variance for confidence metric
- */
-function calculateColorVariance(samples: RGB[], mean: RGB): number {
-  if (samples.length === 0) return 0
+function calculateChannelVariance(
+  rValues: number[],
+  gValues: number[],
+  bValues: number[],
+  mean: RGB
+): number {
+  const length = rValues.length
+  if (length === 0) return 0
 
   let sumSquaredDiff = 0
 
-  for (const sample of samples) {
-    const dr = sample.r - mean.r
-    const dg = sample.g - mean.g
-    const db = sample.b - mean.b
+  for (let i = 0; i < length; i++) {
+    const dr = rValues[i] - mean.r
+    const dg = gValues[i] - mean.g
+    const db = bValues[i] - mean.b
     sumSquaredDiff += dr * dr + dg * dg + db * db
   }
 
-  return sumSquaredDiff / samples.length
+  return sumSquaredDiff / length
 }
 
 /**
