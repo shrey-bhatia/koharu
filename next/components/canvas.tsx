@@ -64,6 +64,8 @@ function Canvas() {
 
   const [isTouchDevice, setIsTouchDevice] = useState(false)
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
+  const stagePosRef = useRef(stagePos)
+  const isBlockDraggingRef = useRef(false)
   const [isZooming, setIsZooming] = useState(false)
   const [stageLocked, setStageLocked] = useState(false)
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 })
@@ -98,6 +100,13 @@ function Canvas() {
         stage.draggable(false)
       } else {
         stage.draggable(true)
+      }
+
+      if (process.env.NODE_ENV !== 'production') {
+        console.info('stage.lock', {
+          locked,
+          draggable: stage.draggable(),
+        })
       }
 
       setStageLocked(locked)
@@ -145,22 +154,8 @@ function Canvas() {
   }, [screenSpace])
 
   useEffect(() => {
-    const stage = stageRef.current
-    if (!stage) return
-
-    const unlock = () => {
-      if (process.env.NODE_ENV !== 'production') {
-        console.info('stage.unlock')
-      }
-      lockStage(false)
-    }
-
-    stage.on('pointerup pointercancel', unlock)
-
-    return () => {
-      stage.off('pointerup pointercancel', unlock)
-    }
-  }, [lockStage])
+    stagePosRef.current = stagePos
+  }, [stagePos])
 
   // Debounced transformer redraw during zoom
   useEffect(() => {
@@ -444,9 +439,17 @@ function Canvas() {
     (event: KonvaEventObject<Event>, block: TextBlock, index: number) => {
       lockStage(true)
       stageRef.current?.stopDrag()
+      isBlockDraggingRef.current = false
       setSelectedBlockIndex(index)
       setSelectedBlockId(block.id ?? null)
       event.cancelBubble = true
+      if (process.env.NODE_ENV !== 'production') {
+        console.info('block.pointer.down', {
+          id: block.id,
+          index,
+          point: event?.evt ? { x: (event.evt as PointerEvent).clientX, y: (event.evt as PointerEvent).clientY } : null,
+        })
+      }
       if (process.env.NODE_ENV !== 'production') {
         console.info('block.select', { id: block.id, index })
       }
@@ -456,7 +459,9 @@ function Canvas() {
 
   const handleBlockPointerUp = useCallback(
     (event: KonvaEventObject<Event>) => {
-      lockStage(false)
+      if (!isBlockDraggingRef.current) {
+        lockStage(false)
+      }
       event.cancelBubble = true
     },
     [lockStage]
@@ -607,8 +612,21 @@ function Canvas() {
                   event.target.stopDrag()
                   lockStage(true)
                 }
+                if (process.env.NODE_ENV !== 'production') {
+                  const pointer = stageRef.current?.getPointerPosition()
+                  console.info('stage.drag.start', {
+                    stageLocked,
+                    draggable: stageRef.current?.draggable(),
+                    pointer,
+                  })
+                }
               }}
               onDragEnd={(e) => {
+                if (process.env.NODE_ENV !== 'production') {
+                  console.info('stage.drag.end', {
+                    position: { x: e.target.x(), y: e.target.y() },
+                  })
+                }
                 setStagePos({ x: e.target.x(), y: e.target.y() })
               }}
             >
@@ -729,13 +747,22 @@ function Canvas() {
                         onPointerUp={handleBlockPointerUp}
                         onDragMove={(e) => {
                           e.cancelBubble = true
+                          if (!isBlockDraggingRef.current) {
+                            isBlockDraggingRef.current = true
+                          }
                         }}
                         onDragEnd={(e) => {
                           e.cancelBubble = true
-                          lockStage(false)
                           const node = e.target as Konva.Node
                           const newX = node.x()
                           const newY = node.y()
+                          if (process.env.NODE_ENV !== 'production') {
+                            console.info('block.drag.end', {
+                              id: block.id,
+                              index,
+                              position: { x: newX, y: newY },
+                            })
+                          }
 
                           updateTextBlock(
                             { id: block.id, index },
@@ -752,6 +779,7 @@ function Canvas() {
                               }
                             }
                           )
+                          isBlockDraggingRef.current = false
                         }}
                         onTransformStart={(e) => {
                           handleBlockPointerDown(e, block, index)
@@ -759,8 +787,9 @@ function Canvas() {
                         }}
                         onTransformEnd={(e) => {
                           e.cancelBubble = true
-                          lockStage(false)
                           handleTransformEnd(block, index, e)
+                          isBlockDraggingRef.current = false
+                          lockStage(false)
                         }}
                       >
                         <Rect
