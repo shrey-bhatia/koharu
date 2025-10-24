@@ -96,7 +96,10 @@ export default function InpaintPanel() {
       cachePrimed = true
 
       const canvas = new OffscreenCanvas(imageWidth, imageHeight)
-      const ctx = canvas.getContext('2d')!
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })
+      if (!ctx) {
+        throw new Error('Failed to acquire inpainting compositing context')
+      }
       ctx.drawImage(image!.bitmap, 0, 0)
 
       for (let i = 0; i < textBlocks.length; i++) {
@@ -208,7 +211,10 @@ export default function InpaintPanel() {
       cachePrimed = true
 
       const canvas = new OffscreenCanvas(imageWidth, imageHeight)
-      const ctx = canvas.getContext('2d')!
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })
+      if (!ctx) {
+        throw new Error('Failed to acquire inpainting compositing context')
+      }
       ctx.drawImage(image!.bitmap, 0, 0)
 
       for (let i = 0; i < textBlocks.length; i++) {

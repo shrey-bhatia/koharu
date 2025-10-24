@@ -16,6 +16,14 @@ export interface CompositingOptions {
 
 const maskCropCache = new WeakMap<Uint8Array, Map<string, Uint8Array>>()
 
+function getOffscreen2DContext(canvas: OffscreenCanvas): OffscreenCanvasRenderingContext2D {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D | null
+  if (!ctx) {
+    throw new Error('Failed to acquire 2D context for offscreen canvas')
+  }
+  return ctx
+}
+
 export async function compositeMaskedRegion(
   baseCtx: OffscreenCanvasRenderingContext2D,
   inpaintedCrop: ImageBitmap,
@@ -83,7 +91,7 @@ export async function compositeMaskedRegion(
     )
 
     const tempCanvas = new OffscreenCanvas(cropWidth, cropHeight)
-    const tempCtx = tempCanvas.getContext('2d')!
+  const tempCtx = getOffscreen2DContext(tempCanvas)
     tempCtx.putImageData(maskedImageData, 0, 0)
 
     baseCtx.drawImage(tempCanvas, cropX, cropY)
@@ -157,7 +165,7 @@ function createFeatheredAlpha(
   featherRadius: number
 ): ImageData {
   const tempCanvas = new OffscreenCanvas(width, height)
-  const tempCtx = tempCanvas.getContext('2d')!
+  const tempCtx = getOffscreen2DContext(tempCanvas)
   tempCtx.drawImage(inpaintedCrop, 0, 0, width, height)
   const inpaintedData = tempCtx.getImageData(0, 0, width, height)
   const pixels = inpaintedData.data
@@ -206,7 +214,7 @@ function detectHighEdgeVariance(
   const basePixels = baseImageData.data
 
   const tempCanvas = new OffscreenCanvas(cropWidth, cropHeight)
-  const tempCtx = tempCanvas.getContext('2d')!
+  const tempCtx = getOffscreen2DContext(tempCanvas)
   tempCtx.drawImage(inpaintedCrop, 0, 0, cropWidth, cropHeight)
   const inpaintData = tempCtx.getImageData(0, 0, cropWidth, cropHeight)
   const inpaintPixels = inpaintData.data
@@ -258,7 +266,7 @@ async function compositeWithGradientBlend(
   const basePixels = baseImageData.data
 
   const tempCanvas = new OffscreenCanvas(cropWidth, cropHeight)
-  const tempCtx = tempCanvas.getContext('2d')!
+  const tempCtx = getOffscreen2DContext(tempCanvas)
   tempCtx.drawImage(inpaintedCrop, 0, 0, cropWidth, cropHeight)
   const inpaintData = tempCtx.getImageData(0, 0, cropWidth, cropHeight)
   const inpaintPixels = inpaintData.data

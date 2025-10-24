@@ -735,7 +735,9 @@ export default function RenderPanel() {
           <Callout.Root size='1'>
             <Callout.Text>
               <strong>To render translations:</strong>
-              <ol className='ml-4 mt-1 list-decimal text-xs'>
+            </Callout.Text>
+            <div className='ml-4 mt-1 text-xs'>
+              <ol className='list-decimal'>
                 <li>Run Detection to find text</li>
                 <li>Run OCR to extract Japanese</li>
                 <li>Run Translation to get English</li>
@@ -743,7 +745,7 @@ export default function RenderPanel() {
                 <li>Customize individual blocks if needed</li>
                 <li>Click &quot;Export&quot; to save final image</li>
               </ol>
-            </Callout.Text>
+            </div>
           </Callout.Root>
         )}
       </div>
