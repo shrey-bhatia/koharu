@@ -11,6 +11,7 @@ import { useZoomPerformance } from '@/utils/zoom-performance'
 import { BackgroundLayer } from './canvas/background-layer'
 import { InpaintLayer } from './canvas/inpaint-layer'
 import { RenderLayer } from './canvas/render-layer'
+import { HtmlRenderLayer } from './canvas/html-render-layer'
 import { DetectionLayer } from './canvas/detection-layer'
 
 const generateBlockId = (): string => {
@@ -416,8 +417,8 @@ function Canvas() {
   return (
     <>
       <div ref={containerRef} className='relative h-full w-full flex-1'>
-        <div className='absolute inset-0 flex items-center-safe justify-center-safe overflow-auto'>
-          <div className='p-2'>
+        <div className='absolute inset-0 flex items-center-safe justify-center-safe overflow-hidden'>
+          <div className='relative w-full h-full'>
             <Stage
               ref={stageRef}
               scaleX={scale}
@@ -493,6 +494,12 @@ function Canvas() {
                 onInteractionEnd={() => handleInteractionLock(false)}
               />
             </Stage>
+            
+            {/* HTML Overlay Layer - sits on top of canvas but below UI controls */}
+            <HtmlRenderLayer 
+              stageScale={scale}
+              stagePos={stagePos}
+            />
           </div>
         </div>
       </div>
