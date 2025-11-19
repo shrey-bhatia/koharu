@@ -1,35 +1,17 @@
 'use client'
 
 import type Konva from 'konva'
-import type { KonvaEventObject } from 'konva/lib/Node'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import {
-  Circle,
-  Group,
-  Image as KonvaImage,
-  Layer,
-  Rect,
-  Stage,
-  Text,
-  Transformer,
-} from 'react-konva'
-import ScaleControl from './scale-control'
+import { Stage } from 'react-konva'
+import ScaleControl from './canvas/scale-control'
 import { useEditorStore } from '@/lib/state'
 import type { TextBlock } from '@/lib/state'
 import { useZoomPerformance } from '@/utils/zoom-performance'
 
-type BlockPointerOptions = {
-  suppressAutoDrag?: boolean
-}
-
-const hasStartDrag = (node: Konva.Node | null): node is Konva.Node & { startDrag: () => void } => {
-  if (!node) {
-    return false
-  }
-
-  const candidate = node as Konva.Node & { startDrag?: unknown }
-  return typeof candidate.startDrag === 'function'
-}
+import { BackgroundLayer } from './canvas/background-layer'
+import { InpaintLayer } from './canvas/inpaint-layer'
+import { RenderLayer } from './canvas/render-layer'
+import { DetectionLayer } from './canvas/detection-layer'
 
 const generateBlockId = (): string => {
   const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined
@@ -53,37 +35,26 @@ function Canvas() {
     scale,
     setScale,
     image,
-  textBlocks,
-  setTextBlocks,
-  updateTextBlock,
-    inpaintedImage,
-    segmentationMaskBitmap,
-    showSegmentationMask,
-  selectedBlockIndex,
-  setSelectedBlockIndex,
-  selectedBlockId,
-  setSelectedBlockId,
-    currentStage,
-    pipelineStages,
-    renderMethod,
-    selectionSensitivity,
+    textBlocks,
+    setTextBlocks,
+    selectedBlockIndex,
+    setSelectedBlockIndex,
+    selectedBlockId,
+    setSelectedBlockId,
     zoomOptimizationsEnabled,
     zoomMetricsEnabled,
     setAddTextAreaHandler,
   } = useEditorStore()
   const containerRef = useRef<HTMLDivElement>(null)
-  const inpaintLayerRef = useRef<Konva.Layer>(null)
   const stageRef = useRef<Konva.Stage>(null)
 
   const [isTouchDevice, setIsTouchDevice] = useState(false)
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
   const stagePosRef = useRef(stagePos)
   const isBlockDraggingRef = useRef(false)
-  const stageDraggablePrevRef = useRef<boolean | null>(null)
   const [isZooming, setIsZooming] = useState(false)
   const stageLockRef = useRef(false)
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 })
-  const transformerRef = useRef<Konva.Transformer>(null)
   const safeScale = Math.max(scale, 0.001)
   const stageScale = stageRef.current?.scaleX?.() ?? safeScale
   const screenSpace = useMemo(() => {
@@ -101,15 +72,10 @@ function Canvas() {
     return null
   }, [selectedBlockId, selectedBlockIndex])
 
-  const lockStage = useCallback((locked: boolean) => {
+  const handleInteractionLock = useCallback((locked: boolean) => {
     stageLockRef.current = locked
-
     if (locked) {
       stageRef.current?.stopDrag()
-    }
-
-    if (process.env.NODE_ENV !== 'production') {
-      console.info('stage.lock', { locked })
     }
   }, [])
 
@@ -121,56 +87,10 @@ function Canvas() {
   const pendingPosRef = useRef<{ x: number; y: number } | null>(null)
   const rafIdRef = useRef<number | null>(null)
   const wheelTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const transformerDebounceRef = useRef<NodeJS.Timeout | null>(null)
-
-  useEffect(() => {
-    const stage = stageRef.current
-    const transformer = transformerRef.current
-
-    if (!stage || !transformer) return
-
-    if (!isDetectionMode || !activeSelectionKey) {
-      transformer.nodes([])
-      transformer.getLayer()?.batchDraw()
-      return
-    }
-
-    const node = stage.findOne(`.region-${activeSelectionKey}`)
-    transformer.nodes(node ? [node] : [])
-    if (process.env.NODE_ENV !== 'production') {
-      console.info('transformer.attach', {
-        id: selectedBlockId,
-        index: selectedBlockIndex,
-        key: activeSelectionKey,
-        found: Boolean(node),
-      })
-    }
-    transformer.getLayer()?.batchDraw()
-  }, [activeSelectionKey, isDetectionMode, selectedBlockId, selectedBlockIndex, textBlocks])
-
-  useEffect(() => {
-    transformerRef.current?.getLayer()?.batchDraw()
-  }, [screenSpace])
 
   useEffect(() => {
     stagePosRef.current = stagePos
   }, [stagePos])
-
-  // Debounced transformer redraw during zoom
-  useEffect(() => {
-    if (!isZooming) {
-      // Immediate update when not zooming
-      transformerRef.current?.getLayer()?.batchDraw()
-    } else {
-      // Debounce during continuous zoom (150ms after zoom ends)
-      if (transformerDebounceRef.current) {
-        clearTimeout(transformerDebounceRef.current)
-      }
-      transformerDebounceRef.current = setTimeout(() => {
-        transformerRef.current?.getLayer()?.batchDraw()
-      }, 150)
-    }
-  }, [scale, selectionSensitivity, isZooming])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -460,83 +380,6 @@ function Canvas() {
     }
   }, [handleWheel, handleKeyDown])
 
-  const handleBlockPointerDown = useCallback(
-    (
-      event: KonvaEventObject<Event>,
-      block: TextBlock,
-      index: number,
-      options?: BlockPointerOptions
-    ) => {
-      lockStage(true)
-      stageRef.current?.stopDrag()
-      if (stageRef.current) {
-        stageDraggablePrevRef.current = stageRef.current.draggable()
-        stageRef.current.draggable(false)
-      }
-      isBlockDraggingRef.current = false
-
-      const blockIdOrNull = block.id ?? null
-      const alreadySelectedById = selectedBlockId === blockIdOrNull
-      const alreadySelectedByIndex = selectedBlockIndex === index
-
-      if (!alreadySelectedByIndex) {
-        setSelectedBlockIndex(index)
-      }
-      if (!alreadySelectedById) {
-        setSelectedBlockId(blockIdOrNull)
-      }
-      event.cancelBubble = true
-      if (process.env.NODE_ENV !== 'production') {
-        console.info('block.pointer.down', {
-          id: block.id,
-          index,
-          point: event?.evt ? { x: (event.evt as PointerEvent).clientX, y: (event.evt as PointerEvent).clientY } : null,
-        })
-      }
-      if (process.env.NODE_ENV !== 'production') {
-        console.info('block.select', { id: block.id, index })
-      }
-
-      const potentialGroup = event.currentTarget as Konva.Node | null
-      const dragNode = hasStartDrag(potentialGroup)
-        ? potentialGroup
-        : (event.target as Konva.Node | null)
-
-      const isTransformerChild = Boolean(
-        (event.target as Konva.Node | null)?.getParent?.()?.getClassName?.() === 'Transformer'
-      )
-      const shouldAutoDrag = !(
-        options?.suppressAutoDrag || isTransformerChild
-      )
-
-      if (shouldAutoDrag && hasStartDrag(dragNode)) {
-        const wasDraggable = dragNode.draggable()
-        if (!wasDraggable) {
-          dragNode.draggable(true)
-        }
-        dragNode.startDrag()
-        if (!wasDraggable) {
-          dragNode.draggable(false)
-        }
-      }
-    },
-    [lockStage, selectedBlockId, selectedBlockIndex, setSelectedBlockId, setSelectedBlockIndex]
-  )
-
-  const handleBlockPointerUp = useCallback(
-    (event: KonvaEventObject<Event>) => {
-      if (!isBlockDraggingRef.current) {
-        lockStage(false)
-        if (stageRef.current && stageDraggablePrevRef.current !== null) {
-          stageRef.current.draggable(stageDraggablePrevRef.current)
-        }
-      }
-      stageDraggablePrevRef.current = null
-      event.cancelBubble = true
-    },
-    [lockStage]
-  )
-
   // Coordinate conversion helpers
   // Convert Stage/screen coordinates to world (image) coordinates
   const toWorld = (stage: Konva.Stage, p: { x: number; y: number }) => {
@@ -545,73 +388,7 @@ function Canvas() {
     return { x: (p.x - sp.x) / s, y: (p.y - sp.y) / s }
   }
 
-  // Handler for when a box is transformed (scaled/rotated/resized)
-  const handleTransformEnd = useCallback(
-    (block: TextBlock, index: number, event: KonvaEventObject<Event>) => {
-      const node = event.target as Konva.Node
-
-      const scaleX = node.scaleX()
-      const scaleY = node.scaleY()
-      const x = node.x()
-      const y = node.y()
-      const width = Math.max(1, node.width() * scaleX)
-      const height = Math.max(1, node.height() * scaleY)
-
-      node.scaleX(1)
-      node.scaleY(1)
-
-      updateTextBlock(
-        { id: block.id, index },
-        (current) => ({
-          ...current,
-          xmin: x,
-          ymin: y,
-          xmax: x + width,
-          ymax: y + height,
-          ocrStale: true,
-        })
-      )
-    },
-    [updateTextBlock]
-  )
-
-  // Memoized box styles to avoid recalculation on every render
-  const boxStyles = useMemo(() => {
-    const offset = Math.max(8, 12 / stageScale)
-    const hitStrokeWidth = screenSpace.hitStrokeWidth + selectionSensitivity * 0.5
-
-    return textBlocks.map(() => ({
-      strokeWidth: screenSpace.borderStrokeWidth,
-      hitStrokeWidth,
-      fontSize: 30 / safeScale,
-      radius: 20 / safeScale,
-      anchorSize: screenSpace.anchorSize,
-      padding: screenSpace.padding,
-      borderStrokeWidth: screenSpace.borderStrokeWidth,
-      labelOffset: offset,
-    }))
-  }, [selectionSensitivity, screenSpace, stageScale, textBlocks, safeScale])
-
   // Determine which base image to display based on currentStage and renderMethod
-  const getBaseImage = () => {
-    // For inpaint tool, always show the current stage content
-    // Don't override stage selection based on tool
-    switch (currentStage) {
-      case 'textless':
-        return pipelineStages.textless?.bitmap || image?.bitmap || null
-      case 'rectangles':
-        return pipelineStages.withRectangles?.bitmap || pipelineStages.textless?.bitmap || image?.bitmap || null
-      case 'final':
-        return pipelineStages.final?.bitmap || image?.bitmap || null
-      case 'original':
-      default:
-        return image?.bitmap || null
-    }
-  }
-
-  const baseImage = getBaseImage()
-  const shouldShowOverlays = tool === 'render' && (currentStage === 'rectangles' || currentStage === 'final')
-  const shouldShowMaskOverlay = Boolean(segmentationMaskBitmap && (tool === 'segmentation' || showSegmentationMask))
   const hasActiveSelection = activeSelectionKey != null
   const allowStageDrag = Boolean(image) && (!isDetectionMode || !hasActiveSelection)
 
@@ -628,27 +405,13 @@ function Canvas() {
     [allowStageDrag, clampStagePosition]
   )
 
-  // Visibility guards for layers (only render active layers)
-  const showDetectionLayer = isDetectionMode
-  const showRenderRectanglesLayer = shouldShowOverlays && renderMethod === 'rectangle'
-  const showRenderTextLayer = tool === 'render' && currentStage === 'final'
-  const showSegmentationLayer = tool === 'segmentation'
-  const showInpaintLayer = tool === 'inpaint' && inpaintedImage
-
-  useEffect(() => {
-    if (!showDetectionLayer && stageLockRef.current) {
-      lockStage(false)
-    }
-  }, [showDetectionLayer, lockStage])
-
   useEffect(() => {
     if (!isDetectionMode) {
-      transformerRef.current?.nodes([])
-      lockStage(false)
+      handleInteractionLock(false)
       setSelectedBlockId(null)
       setSelectedBlockIndex(null)
     }
-  }, [isDetectionMode, lockStage, setSelectedBlockId, setSelectedBlockIndex])
+  }, [isDetectionMode, handleInteractionLock, setSelectedBlockId, setSelectedBlockIndex])
 
   return (
     <>
@@ -670,14 +433,14 @@ function Canvas() {
                 if (event.target === event.currentTarget) {
                   setSelectedBlockIndex(null)
                   setSelectedBlockId(null)
-                  lockStage(false)
+                  handleInteractionLock(false)
                 }
               }}
               onTap={(event) => {
                 if (event.target === event.currentTarget) {
                   setSelectedBlockIndex(null)
                   setSelectedBlockId(null)
-                  lockStage(false)
+                  handleInteractionLock(false)
                 }
               }}
               onDragStart={(event) => {
@@ -720,248 +483,15 @@ function Canvas() {
                 }
               }}
             >
-              {/* Layer 1: Base image (respects pipeline stage) */}
-              <Layer>
-                <KonvaImage image={baseImage} x={0} y={0} />
-              </Layer>
-
-              {/* Layer 1.5: Segmentation overlay */}
-              {shouldShowMaskOverlay && (
-                <Layer listening={false} opacity={0.6}>
-                  <KonvaImage image={segmentationMaskBitmap || null} x={0} y={0} listening={false} />
-                </Layer>
-              )}
-
-              {/* Layer 2: Rectangle fills (render mode, only for 'rectangles' and 'final' stages) */}
-              {showRenderRectanglesLayer && (
-                <Layer>
-                  {textBlocks?.map((block, index) => {
-                    if (!block.backgroundColor) return null
-
-                    const bg = block.manualBgColor || block.backgroundColor
-                    const { xmin, ymin, xmax, ymax } = block
-                    const width = xmax - xmin
-                    const height = ymax - ymin
-
-                    return (
-                      <Rect
-                        key={`fill-${index}`}
-                        x={xmin}
-                        y={ymin}
-                        width={width}
-                        height={height}
-                        fill={`rgb(${bg.r}, ${bg.g}, ${bg.b})`}
-                        cornerRadius={5}
-                      />
-                    )
-                  })}
-                </Layer>
-              )}
-
-              {/* Layer 3: Translated text (render mode, only for 'final' stage) */}
-              {showRenderTextLayer && (
-                <Layer>
-                  {textBlocks?.map((block, index) => {
-                    if (!block.translatedText || !block.fontSize || !block.textColor) return null
-
-                    const textColor = block.manualTextColor || block.textColor
-                    const { xmin, ymin, xmax, ymax } = block
-                    const width = xmax - xmin
-                    const height = ymax - ymin
-
-                    // Check for outline from appearance analysis
-                    const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
-                    const outlineColor = hasOutline ? block.appearance.sourceOutlineColor : undefined
-                    const outlineWidth = hasOutline ? block.appearance.outlineWidthPx : undefined
-
-                    return (
-                      <Text
-                        key={`translated-${index}`}
-                        x={xmin}
-                        y={ymin}
-                        width={width}
-                        height={height}
-                        text={block.translatedText}
-                        fontSize={block.fontSize}
-                        fontFamily={block.fontFamily || 'Arial'}
-                        fill={`rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`}
-                        stroke={outlineColor ? `rgb(${outlineColor.r}, ${outlineColor.g}, ${outlineColor.b})` : undefined}
-                        strokeWidth={outlineWidth}
-                        letterSpacing={block.letterSpacing}
-                        lineHeight={block.lineHeight}
-                        align='center'
-                        verticalAlign='middle'
-                        wrap='word'
-                      />
-                    )
-                  })}
-                </Layer>
-              )}
-
-              {/* Layer 4: Detection boxes (detection mode) */}
-              {showDetectionLayer && (
-                <Layer>
-                  {textBlocks?.map((block, index) => {
-                    const { xmin, ymin, xmax, ymax } = block
-                    const width = xmax - xmin
-                    const height = ymax - ymin
-                    const styles = boxStyles[index]
-                    const regionKey = block.id ?? String(index)
-                    const isSelected = block.id
-                      ? block.id === selectedBlockId
-                      : selectedBlockIndex === index
-                    const strokeColor = isSelected
-                      ? '#1976d2'
-                      : block.ocrStale
-                        ? '#f97316'
-                        : '#e11d48'
-
-                    const labelOffset = styles.labelOffset
-                    const labelX = -labelOffset
-                    const labelY = -labelOffset
-                    const labelDiameter = styles.radius * 2
-
-                    return (
-                      <Group
-                        key={`region-${regionKey}`}
-                        name={`region-${regionKey}`}
-                        data-block-id={block.id ?? undefined}
-                        x={xmin}
-                        y={ymin}
-                        width={width}
-                        height={height}
-                        draggable
-                        onPointerDown={(e) => handleBlockPointerDown(e, block, index)}
-                        onClick={(e) => handleBlockPointerDown(e, block, index)}
-                        onTap={(e) => handleBlockPointerDown(e, block, index)}
-                        onPointerUp={handleBlockPointerUp}
-                        onDragMove={(e) => {
-                          e.cancelBubble = true
-                          if (!isBlockDraggingRef.current) {
-                            isBlockDraggingRef.current = true
-                          }
-                        }}
-                        onDragEnd={(e) => {
-                          e.cancelBubble = true
-                          const node = e.target as Konva.Node
-                          const newX = node.x()
-                          const newY = node.y()
-                          if (process.env.NODE_ENV !== 'production') {
-                            console.info('block.drag.end', {
-                              id: block.id,
-                              index,
-                              position: { x: newX, y: newY },
-                            })
-                          }
-
-                          updateTextBlock(
-                            { id: block.id, index },
-                            (current) => {
-                              const currentWidth = current.xmax - current.xmin
-                              const currentHeight = current.ymax - current.ymin
-                              return {
-                                ...current,
-                                xmin: newX,
-                                ymin: newY,
-                                xmax: newX + currentWidth,
-                                ymax: newY + currentHeight,
-                                ocrStale: true,
-                              }
-                            }
-                          )
-                          isBlockDraggingRef.current = false
-                          if (stageRef.current && stageDraggablePrevRef.current !== null) {
-                            stageRef.current.draggable(stageDraggablePrevRef.current)
-                          }
-                          stageDraggablePrevRef.current = null
-                          lockStage(false)
-                        }}
-                        onTransformStart={(e) => {
-                          handleBlockPointerDown(e, block, index, { suppressAutoDrag: true })
-                          lockStage(true)
-                        }}
-                        onTransformEnd={(e) => {
-                          e.cancelBubble = true
-                          handleTransformEnd(block, index, e)
-                          isBlockDraggingRef.current = false
-                          if (stageRef.current && stageDraggablePrevRef.current !== null) {
-                            stageRef.current.draggable(stageDraggablePrevRef.current)
-                          }
-                          stageDraggablePrevRef.current = null
-                          lockStage(false)
-                        }}
-                      >
-                        <Rect
-                          // Nearly invisible fill ensures the entire box is draggable/selectable
-                          x={0}
-                          y={0}
-                          width={width}
-                          height={height}
-                          fill='black'
-                          opacity={0.001}
-                        />
-                        <Rect
-                          x={0}
-                          y={0}
-                          width={width}
-                          height={height}
-                          stroke={strokeColor}
-                          strokeWidth={styles.strokeWidth}
-                          strokeScaleEnabled={false}
-                          perfectDrawEnabled={false}
-                          hitStrokeWidth={styles.hitStrokeWidth}
-                        />
-                        <Circle
-                          x={labelX}
-                          y={labelY}
-                          radius={styles.radius}
-                          fill='rgba(255, 0, 0, 0.7)'
-                          listening={false}
-                        />
-                        <Text
-                          x={labelX}
-                          y={labelY}
-                          text={(index + 1).toString()}
-                          fontSize={styles.fontSize}
-                          fill='white'
-                          fontFamily='sans-serif'
-                          width={labelDiameter}
-                          height={labelDiameter}
-                          offsetX={labelDiameter / 2}
-                          offsetY={labelDiameter / 2}
-                          align='center'
-                          verticalAlign='middle'
-                          listening={false}
-                        />
-                      </Group>
-                    )
-                  })}
-                  <Transformer
-                    ref={transformerRef}
-                    visible={Boolean(activeSelectionKey)}
-                    listening={Boolean(activeSelectionKey)}
-                    ignoreStroke={false}
-                    rotateEnabled={false}
-                    anchorSize={screenSpace.anchorSize}
-                    padding={screenSpace.padding}
-                    borderStroke='#1976d2'
-                    borderStrokeWidth={screenSpace.borderStrokeWidth}
-                    anchorStroke='#1976d2'
-                    anchorFill='#ffffff'
-                    anchorCornerRadius={2}
-                  />
-                </Layer>
-              )}
-              {showSegmentationLayer && (
-                <Layer>
-                  <KonvaImage image={null} x={0} y={0} />
-                </Layer>
-              )}
-              {showInpaintLayer && (
-                <Layer ref={inpaintLayerRef}>
-                  <KonvaImage image={inpaintedImage.bitmap} x={0} y={0} />
-                </Layer>
-              )}
+              <BackgroundLayer />
+              <InpaintLayer />
+              <RenderLayer />
+              <DetectionLayer 
+                screenSpace={screenSpace}
+                isZooming={isZooming}
+                onInteractionStart={() => handleInteractionLock(true)}
+                onInteractionEnd={() => handleInteractionLock(false)}
+              />
             </Stage>
           </div>
         </div>
