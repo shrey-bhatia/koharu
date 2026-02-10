@@ -136,7 +136,16 @@ impl PaddleOcrPipeline {
 
         // Run inference
         let outputs = det_session.run(ort::inputs!["x" => ort_tensor])?;
-        let (_shape, output_data) = outputs["output"].try_extract_tensor::<f32>()?;
+        // Safe access: .get() returns Option instead of panicking via Index trait.
+        // With panic = "abort" in release profile, any panic kills the whole process.
+        let output_value = outputs.get("output").ok_or_else(|| {
+            let keys: Vec<&str> = outputs.keys().collect();
+            anyhow::anyhow!(
+                "PaddleOCR detection model output 'output' not found. Available outputs: {:?}",
+                keys
+            )
+        })?;
+        let (_shape, output_data) = output_value.try_extract_tensor::<f32>()?;
 
         self.postprocess_detection(output_data)
     }
@@ -162,7 +171,15 @@ impl PaddleOcrPipeline {
 
             // Run inference
             let outputs = rec_session.run(ort::inputs!["x" => ort_tensor])?;
-            let recognized_text = self.postprocess_recognition(&outputs["output"])?;
+            // Safe access: .get() returns Option instead of panicking via Index trait.
+            let output_value = outputs.get("output").ok_or_else(|| {
+                let keys: Vec<&str> = outputs.keys().collect();
+                anyhow::anyhow!(
+                    "PaddleOCR recognition model output 'output' not found. Available outputs: {:?}",
+                    keys
+                )
+            })?;
+            let recognized_text = self.postprocess_recognition(output_value)?;
 
             let mut result = region.clone();
             result.text = recognized_text;

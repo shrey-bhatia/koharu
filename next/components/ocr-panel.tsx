@@ -3,7 +3,6 @@
 import { Play, AlertTriangle, Pencil } from 'lucide-react'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Badge, Button, Callout, TextArea } from '@radix-ui/themes'
-import { imageBitmapToArrayBuffer } from '@/utils/image'
 import { useEditorStore } from '@/lib/state'
 import { invoke } from '@tauri-apps/api/core'
 
@@ -70,9 +69,14 @@ export default function OCRPanel() {
       const totalStart = performance.now()
 
       const cacheStart = performance.now()
-      const imageBuffer = await imageBitmapToArrayBuffer(image.bitmap)
+      // Send the original image buffer directly as ArrayBuffer.
+      // Tauri handles ArrayBuffer as efficient binary transfer.
+      // Previously this re-encoded the bitmap to PNG via canvas and
+      // converted to Array.from(new Uint8Array(...)), which created a
+      // massive JSON payload (~100-300MB for large images) causing OOM crashes.
+      const imageBuffer = image.buffer
       await invoke('cache_ocr_image', {
-        imagePng: Array.from(new Uint8Array(imageBuffer)),
+        imagePng: imageBuffer,
       })
       cachePrimed = true
       cacheDuration = performance.now() - cacheStart

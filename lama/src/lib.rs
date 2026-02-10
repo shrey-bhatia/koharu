@@ -150,7 +150,16 @@ impl Lama {
             "mask" => TensorRef::from_array_view(mask_data.view())?,
         ];
         let outputs = self.model.run(inputs)?;
-        let output = outputs["output"].try_extract_array::<f32>()?;
+        // Safe access: .get() returns Option instead of panicking via Index trait.
+        // With panic = "abort" in release profile, any panic kills the whole process.
+        let output_value = outputs.get("output").ok_or_else(|| {
+            let keys: Vec<&str> = outputs.keys().collect();
+            anyhow::anyhow!(
+                "LaMa inpainting model output 'output' not found. Available outputs: {:?}",
+                keys
+            )
+        })?;
+        let output = output_value.try_extract_array::<f32>()?;
         let output = output.view();
 
         let mut output_image = image::RgbImage::new(model_size, model_size);

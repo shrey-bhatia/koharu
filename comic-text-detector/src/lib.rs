@@ -51,26 +51,34 @@ impl ComicTextDetector {
         confidence_threshold: f32,
         nms_threshold: f32,
     ) -> anyhow::Result<Output> {
+        debug_assert!(confidence_threshold >= 0.0 && confidence_threshold <= 1.0);
+        debug_assert!(nms_threshold >= 0.0 && nms_threshold <= 1.0);
+        debug_assert!(image.width() > 0 && image.height() > 0);
+
         let (orig_width, orig_height) = image.dimensions();
         let w_ratio = orig_width as f32 / 1024.0;
         let h_ratio = orig_height as f32 / 1024.0;
         let image = image.resize_exact(1024, 1024, image::imageops::FilterType::CatmullRom);
 
-        let mut input = ndarray::Array::zeros((1, 3, 1024, 1024));
-        for pixel in image.pixels() {
-            let x = pixel.0 as usize;
-            let y = pixel.1 as usize;
-            let [r, g, b, _] = pixel.2.0;
-            input[[0, 0, y, x]] = (r as f32) / 255.0;
-            input[[0, 1, y, x]] = (g as f32) / 255.0;
-            input[[0, 2, y, x]] = (b as f32) / 255.0;
-        }
+        let rgb_image = image.to_rgb8();
+        let raw = rgb_image.as_raw();
+        let input = ndarray::Array::from_shape_fn((1, 3, 1024, 1024), |(_, c, y, x)| {
+            raw[(y * 1024 + x) * 3 + c] as f32 / 255.0
+        });
 
         let inputs = inputs!["images" => TensorRef::from_array_view(input.view())?];
         let outputs = self.model.run(inputs)?;
 
-        // handle blocks
-        let blk = outputs["blk"].try_extract_array::<f32>()?;
+        // handle blocks — safe access via .get() instead of Index trait which panics.
+        // With panic = "abort" in release, any panic kills the whole process.
+        let blk_value = outputs.get("blk").ok_or_else(|| {
+            let keys: Vec<&str> = outputs.keys().collect();
+            anyhow::anyhow!(
+                "Detection model output 'blk' not found. Available outputs: {:?}",
+                keys
+            )
+        })?;
+        let blk = blk_value.try_extract_array::<f32>()?;
         let blk = blk.view();
 
         let mut boxes: Vec<Vec<Bbox<_>>> = (0..=1).map(|_| vec![]).collect();
@@ -92,10 +100,10 @@ impl ComicTextDetector {
 
             boxes[class_index].push(Bbox {
                 confidence,
-                xmin: center_x - width / 2.,
-                ymin: center_y - height / 2.,
-                xmax: center_x + width / 2.,
-                ymax: center_y + height / 2.,
+                xmin: (center_x - width / 2.).max(0.0),
+                ymin: (center_y - height / 2.).max(0.0),
+                xmax: (center_x + width / 2.).min(orig_width as f32),
+                ymax: (center_y + height / 2.).min(orig_height as f32),
                 data: (),
             });
         }
@@ -117,13 +125,16 @@ impl ComicTextDetector {
             }
         }
 
-        // handle masks
-        let mask = outputs["seg"].try_extract_array::<f32>()?;
-        let mask = mask
-            .view()
-            .to_owned()
-            .into_dimensionality::<ndarray::Ix4>()?;
-        // Extract the relevant 2D slice from the 4D array
+        // handle masks — safe .get() access
+        let seg_value = outputs.get("seg").ok_or_else(|| {
+            let keys: Vec<&str> = outputs.keys().collect();
+            anyhow::anyhow!(
+                "Detection model output 'seg' not found. Available outputs: {:?}",
+                keys
+            )
+        })?;
+        let mask = seg_value.try_extract_array::<f32>()?;
+        let mask = mask.view();
         let mask_slice = mask.slice(ndarray::s![0, 0, .., ..]);
 
         // Create a new 2D array for the thresholded values
@@ -143,6 +154,11 @@ impl ComicTextDetector {
         );
         let segment =
             imageproc::morphology::erode(&segment, imageproc::distance_transform::Norm::L2, 1);
+        // Resize mask to original image dimensions
+        let segment = image::imageops::resize(
+            &segment, orig_width, orig_height,
+            image::imageops::FilterType::CatmullRom,
+        );
         let mask_width = segment.width();
         let mask_height = segment.height();
         let segment = segment.into_raw();

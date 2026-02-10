@@ -64,7 +64,16 @@ impl MangaOCR {
             "pixel_values" => TensorRef::from_array_view(tensor.view())?,
         };
         let outputs = self.encoder_model.run(inputs)?;
-        let encoder_hidden_state = outputs[0].try_extract_array::<f32>()?;
+        // Use safe .get() access instead of Index trait which panics on missing keys.
+        // With panic = "abort" in release profile, any panic kills the whole process.
+        let encoder_output = outputs.iter().next().ok_or_else(|| {
+            let keys: Vec<&str> = outputs.keys().collect();
+            anyhow::anyhow!(
+                "Encoder model returned no outputs (expected at least 1). Available keys: {:?}",
+                keys
+            )
+        })?;
+        let encoder_hidden_state = encoder_output.1.try_extract_array::<f32>()?;
 
         // generate
         let mut token_ids: Vec<i64> = vec![2i64]; // Start token
@@ -80,8 +89,15 @@ impl MangaOCR {
             // Run inference
             let outputs = self.decoder_model.run(inputs)?;
 
-            // Extract logits from output
-            let logits = outputs["logits"].try_extract_array::<f32>()?;
+            // Safe access: .get() returns Option instead of panicking via Index trait.
+            let logits_value = outputs.get("logits").ok_or_else(|| {
+                let keys: Vec<&str> = outputs.keys().collect();
+                anyhow::anyhow!(
+                    "Decoder model output 'logits' not found. Available outputs: {:?}",
+                    keys
+                )
+            })?;
+            let logits = logits_value.try_extract_array::<f32>()?;
 
             // Get last token logits and find argmax
             let logits_view = logits.view();
@@ -89,7 +105,9 @@ impl MangaOCR {
             let (token_id, _) = last_token_logits
                 .iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .max_by(|(_, a), (_, b)| {
+                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                })
                 .unwrap_or((0, &0.0));
 
             token_ids.push(token_id as i64);

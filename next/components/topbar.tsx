@@ -70,10 +70,10 @@ function Topbar() {
     setTextBlocks(updated)
   }
 
-  const stageLabels = {
+  const stageLabels: Record<string, string> = {
     original: 'Original',
     textless: 'Textless',
-    rectangles: '+Backgrounds',
+    withRectangles: '+Backgrounds',
     final: 'Final'
   }
 
@@ -94,17 +94,16 @@ function Topbar() {
         {/* Pipeline Stage Viewer */}
         {(tool === 'render' || tool === 'inpaint') && (
           <div className='flex items-center gap-1'>
-            {(['original', 'textless', 'rectangles', 'final'] as const)
+            {(['original', 'textless', 'withRectangles', 'final'] as const)
               .filter(stage => {
                 // Hide +Backgrounds stage for LaMa/NewLaMa methods since rectangles don't apply
-                if (stage === 'rectangles' && (renderMethod === 'lama' || renderMethod === 'newlama')) {
+                if (stage === 'withRectangles' && (renderMethod === 'lama' || renderMethod === 'newlama')) {
                   return false
                 }
                 return true
               })
               .map((stage) => {
-                const stageName = stage === 'rectangles' ? 'withRectangles' : stage
-                const hasStage = stage === 'original' || pipelineStages[stageName as keyof typeof pipelineStages] !== null
+                const hasStage = stage === 'original' || pipelineStages[stage] !== null
                 const isActive = currentStage === stage
 
                 return (

@@ -116,7 +116,7 @@ export default function DetectionPanel() {
           console.log('Running appearance analysis on', blocks.length, 'blocks...')
           const startTime = performance.now()
 
-          blocks = await analyzeTextAppearance(sourceImage.bitmap, maskArray, blocks)
+          blocks = await analyzeTextAppearance(sourceImage.bitmap, maskArray, blocks, maskInfo.width, maskInfo.height)
 
           const duration = performance.now() - startTime
           console.log(`Appearance analysis completed in ${duration.toFixed(2)}ms`)

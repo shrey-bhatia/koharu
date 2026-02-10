@@ -6,7 +6,7 @@ export const RenderLayer = () => {
   const { tool, currentStage, textBlocks } = useEditorStore()
   // We now use HtmlRenderLayer for text rendering in the UI
   // This layer is kept for rectangle rendering or future canvas-specific needs
-  const showRenderRectanglesLayer = tool === 'render' && currentStage === 'rectangles'
+  const showRenderRectanglesLayer = tool === 'render' && currentStage === 'withRectangles'
 
   if (!showRenderRectanglesLayer) return null
 

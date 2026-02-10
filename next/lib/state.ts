@@ -300,7 +300,6 @@ export const useEditorStore = create(
       inpaintingPreset: 'balanced' as 'fast' | 'balanced' | 'quality' | 'custom',
       defaultFont: loadDefaultFont(),
       fontSizeStep: 2,
-      availableOcrModels: ['manga-ocr', 'paddle-ocr'],
       ocrEngine: loadOcrEngine(),
       selectionSensitivity: loadSelectionSensitivity(),
       sidebarWidth: initialSidebarState.sidebarWidth,
@@ -311,7 +310,7 @@ export const useEditorStore = create(
       addTextAreaHandler: null,
     } as {
       image: Image | null
-      tool: string
+      tool: 'detection' | 'translation' | 'inpaint' | 'render' | 'segmentation'
       scale: number
       textBlocks: TextBlock[]
       translationApiKey: string | null
@@ -330,8 +329,7 @@ export const useEditorStore = create(
       selectedBlockIndex: number | null
     selectedBlockId: string | null
       gpuPreference: 'cuda' | 'directml' | 'cpu'
-      currentStage: 'original' | 'textless' | 'rectangles' | 'final'
-      availableOcrModels: string[]
+      currentStage: 'original' | 'textless' | 'withRectangles' | 'final'
       ocrEngine: 'manga-ocr' | 'paddle-ocr'
       pipelineStages: {
         original: Image | null
@@ -393,7 +391,7 @@ export const useEditorStore = create(
           showSegmentationMask: false,
         }
       }),
-      setTool: (tool: string) => set({ tool }),
+      setTool: (tool: 'detection' | 'translation' | 'inpaint' | 'render' | 'segmentation') => set({ tool }),
       setScale: (scale: number) => set({ scale }),
       setTextBlocks: (textBlocks: TextBlock[]) => set({ textBlocks }),
       updateTextBlock: (
@@ -506,7 +504,7 @@ export const useEditorStore = create(
         }
         set({ ocrEngine: engine })
       },
-      setCurrentStage: (stage: 'original' | 'textless' | 'rectangles' | 'final') => set({ currentStage: stage }),
+      setCurrentStage: (stage: 'original' | 'textless' | 'withRectangles' | 'final') => set({ currentStage: stage }),
       setPipelineStage: (stage: 'original' | 'textless' | 'withRectangles' | 'final', image: Image | null) =>
         set((state) => {
           // Close old bitmap for this stage to prevent GPU memory leak

@@ -129,6 +129,10 @@ pub async fn detection(
     );
 
     let inference_start = Instant::now();
+    // NOTE: Inference is CPU-bound but runs under a Mutex guard which is !Send.
+    // Moving to spawn_blocking would require restructuring the model ownership.
+    // Since only one inference runs at a time (serialized by Mutex), the async
+    // runtime impact is acceptable for now.
     let output = state
         .comic_text_detector
         .lock()
@@ -151,7 +155,7 @@ pub async fn detection(
     let encode_start = Instant::now();
     let mask_image = image::GrayImage::from_vec(mask_width, mask_height, segment)
         .context("Failed to reconstruct segmentation mask")?;
-    let mut mask_dynamic = image::DynamicImage::ImageLuma8(mask_image);
+    let mask_dynamic = image::DynamicImage::ImageLuma8(mask_image);
     let mut mask_png = Vec::new();
     mask_dynamic
         .write_to(&mut Cursor::new(&mut mask_png), image::ImageFormat::Png)
@@ -176,6 +180,8 @@ pub async fn detection(
     })
 }
 
+/// Legacy direct OCR command - frontend uses cache_ocr_image + ocr_cached_block instead.
+/// Kept for potential debugging/testing use.
 #[tauri::command]
 pub async fn ocr(app: AppHandle, image: Vec<u8>) -> CommandResult<Vec<String>> {
     let state = app.state::<AppState>();
@@ -367,47 +373,21 @@ pub async fn set_active_ocr(app: AppHandle, model_key: String) -> CommandResult<
     Ok(())
 }
 
-/// DEPRECATED: Full-image inpainting - replaced by inpaint_region with per-block processing
-/// This function produces suboptimal results (white fills) and should not be used.
-/// Use inpaint_region instead for proper cropping, erosion, and mask handling.
 #[tauri::command]
-#[deprecated(note = "Use inpaint_region instead - this produces white artifacts")]
-pub async fn inpaint(app: AppHandle, image: Vec<u8>, mask: Vec<u8>) -> CommandResult<Vec<u8>> {
-    let state = app.state::<AppState>();
+pub async fn get_system_fonts() -> CommandResult<Vec<String>> {
+    tokio::task::spawn_blocking(|| {
+        let source = SystemSource::new();
+        let mut fonts = source
+            .all_families()
+            .context("Failed to enumerate system fonts")?;
 
-    let img = image::load_from_memory(&image).context("Failed to load image")?;
-    let mask_img = image::load_from_memory(&mask).context("Failed to load mask")?;
+        // Sort alphabetically for better UX
+        fonts.sort();
 
-    let result = state
-        .lama
-        .lock()
-        .await
-        .inference(&img, &mask_img)
-        .context("Failed to perform inpainting")?;
-
-    // Encode result as PNG so frontend can decode it
-    let mut png_bytes = Vec::new();
-    result
-        .write_to(
-            &mut std::io::Cursor::new(&mut png_bytes),
-            image::ImageFormat::Png,
-        )
-        .context("Failed to encode inpainted image as PNG")?;
-
-    Ok(png_bytes)
-}
-
-#[tauri::command]
-pub fn get_system_fonts() -> CommandResult<Vec<String>> {
-    let source = SystemSource::new();
-    let mut fonts = source
-        .all_families()
-        .context("Failed to enumerate system fonts")?;
-
-    // Sort alphabetically for better UX
-    fonts.sort();
-
-    Ok(fonts)
+        Ok(fonts)
+    })
+    .await
+    .context("Font enumeration task panicked")?
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -571,15 +551,15 @@ async fn run_inpainting_pipeline(
             ));
         }
 
-        let mut cropped_mask = GrayImage::new(mask_crop_width, mask_crop_height);
-        for y in 0..mask_crop_height {
-            for x in 0..mask_crop_width {
-                let px = (mask_xmin + x).min(mask_width - 1);
-                let py = (mask_ymin + y).min(mask_height - 1);
-                let pixel = full_mask.get_pixel(px, py);
-                cropped_mask.put_pixel(x, y, *pixel);
-            }
-        }
+        let mask_crop_width = mask_crop_width.min(mask_width - mask_xmin);
+        let mask_crop_height = mask_crop_height.min(mask_height - mask_ymin);
+        let cropped_mask = image::imageops::crop_imm(
+            full_mask,
+            mask_xmin,
+            mask_ymin,
+            mask_crop_width,
+            mask_crop_height,
+        ).to_image();
 
         let mut thresholded = cropped_mask.clone();
         for pixel in thresholded.pixels_mut() {
@@ -667,6 +647,10 @@ async fn run_inpainting_pipeline(
 
     let mask_dynamic = image::DynamicImage::ImageLuma8(cropped_mask.clone());
 
+    // NOTE: Inference is CPU-bound but runs under a Mutex guard which is !Send.
+    // Moving to spawn_blocking would require restructuring the model ownership.
+    // Since only one inference runs at a time (serialized by Mutex), the async
+    // runtime impact is acceptable for now.
     let inpainted_crop = state
         .lama
         .lock()
@@ -858,6 +842,8 @@ pub async fn clear_inpainting_cache(app: AppHandle) -> CommandResult<()> {
     Ok(())
 }
 
+/// Legacy non-cached inpainting path - frontend uses cache_inpainting_data + inpaint_region_cached.
+/// Kept for backwards compatibility and debugging.
 #[tauri::command]
 pub async fn inpaint_region(
     app: AppHandle,
@@ -929,26 +915,6 @@ pub async fn inpaint_region(
     run_inpainting_pipeline(&app, &state, &full_image, &full_mask, &bbox, &cfg)
         .await
         .map_err(Into::into)
-}
-/// Simple erosion: shrink white regions by kernel_size pixels
-fn erode_mask(mask: &image::GrayImage, kernel_size: u32) -> image::GrayImage {
-    use imageproc::distance_transform::Norm;
-    use imageproc::morphology::dilate_mut;
-
-    let mut result = mask.clone();
-
-    // Invert (so white becomes black), dilate (grows black), invert back (shrinks white)
-    for pixel in result.pixels_mut() {
-        pixel[0] = 255 - pixel[0];
-    }
-
-    dilate_mut(&mut result, Norm::LInf, kernel_size as u8);
-
-    for pixel in result.pixels_mut() {
-        pixel[0] = 255 - pixel[0];
-    }
-
-    result
 }
 
 /// Save debug triptych: original crop, mask, and red overlay
@@ -1081,40 +1047,46 @@ pub struct GpuDevice {
     pub backend: String,
 }
 
+/// GPU device enumeration - not currently called by frontend.
+/// Kept for potential debugging/settings UI use.
 #[tauri::command]
-pub fn get_gpu_devices() -> CommandResult<Vec<GpuDevice>> {
-    use wgpu::{Backends, Instance, InstanceDescriptor};
+pub async fn get_gpu_devices() -> CommandResult<Vec<GpuDevice>> {
+    tokio::task::spawn_blocking(|| {
+        use wgpu::{Backends, Instance, InstanceDescriptor};
 
-    let instance = Instance::new(InstanceDescriptor {
-        backends: Backends::all(),
-        ..Default::default()
-    });
-
-    let adapters = instance.enumerate_adapters(Backends::all());
-    let mut devices = Vec::new();
-
-    for (idx, adapter) in adapters.iter().enumerate() {
-        let info = adapter.get_info();
-        devices.push(GpuDevice {
-            device_id: idx as u32,
-            name: info.name.clone(),
-            vendor: match info.vendor {
-                0x10DE => "NVIDIA".to_string(),
-                0x1002 | 0x1022 => "AMD".to_string(),
-                0x8086 => "Intel".to_string(),
-                _ => format!("Unknown (0x{:04X})", info.vendor),
-            },
-            backend: format!("{:?}", info.backend),
+        let instance = Instance::new(InstanceDescriptor {
+            backends: Backends::all(),
+            ..Default::default()
         });
-    }
 
-    Ok(devices)
+        let adapters = instance.enumerate_adapters(Backends::all());
+        let mut devices = Vec::new();
+
+        for (idx, adapter) in adapters.iter().enumerate() {
+            let info = adapter.get_info();
+            devices.push(GpuDevice {
+                device_id: idx as u32,
+                name: info.name.clone(),
+                vendor: match info.vendor {
+                    0x10DE => "NVIDIA".to_string(),
+                    0x1002 | 0x1022 => "AMD".to_string(),
+                    0x8086 => "Intel".to_string(),
+                    _ => format!("Unknown (0x{:04X})", info.vendor),
+                },
+                backend: format!("{:?}", info.backend),
+            });
+        }
+
+        Ok(devices)
+    })
+    .await
+    .context("GPU device enumeration task panicked")?
 }
 
 #[tauri::command]
 pub async fn get_current_gpu_status(app: AppHandle) -> CommandResult<crate::state::GpuInitResult> {
     let state = app.state::<AppState>();
-    let init_result = state.gpu_init_result.lock().await;
+    let init_result = state.gpu_init_result.read().await;
     Ok(init_result.clone())
 }
 
@@ -1248,6 +1220,7 @@ pub async fn translate_with_deepl(
         request_body
     );
 
+    // TODO: Move to a shared reqwest::Client in AppState for connection reuse
     let client = reqwest::Client::new();
     let response = client
         .post(&url)
@@ -1317,8 +1290,10 @@ pub async fn translate_with_ollama(
     text: String,
     model: String,
     system_prompt: Option<String>,
+    base_url: Option<String>,
 ) -> CommandResult<String> {
-    let url = "http://localhost:11434/api/chat";
+    let base = base_url.unwrap_or_else(|| "http://localhost:11434".to_string());
+    let url = format!("{}/api/chat", base);
 
     // Build messages array
     let mut messages = Vec::new();
@@ -1345,15 +1320,16 @@ pub async fn translate_with_ollama(
         stream: false,
     };
 
+    // TODO: Move to a shared reqwest::Client in AppState for connection reuse
     let client = reqwest::Client::new();
     let response = client
-        .post(url)
+        .post(&url)
         .header("Content-Type", "application/json")
         .json(&request_body)
         .send()
         .await
         .context(
-            "Failed to connect to Ollama. Make sure Ollama is running on http://localhost:11434",
+            format!("Failed to connect to Ollama. Make sure Ollama is running on {}", base),
         )?;
 
     let status = response.status();
@@ -1388,6 +1364,7 @@ pub struct RenderRequest {
     pub default_font: String,
 }
 
+// TODO: Consider wrapping in spawn_blocking for CPU-bound rendering work
 #[tauri::command]
 pub async fn render_and_export_image(request: RenderRequest) -> CommandResult<Vec<u8>> {
     tracing::info!(

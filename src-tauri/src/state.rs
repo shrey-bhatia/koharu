@@ -22,7 +22,7 @@ pub struct GpuInitResult {
 pub struct AppState {
     pub comic_text_detector: Mutex<ComicTextDetector>,
     pub lama: Mutex<Lama>,
-    pub gpu_init_result: Mutex<GpuInitResult>,
+    pub gpu_init_result: RwLock<GpuInitResult>,
     pub ocr_pipelines: RwLock<HashMap<String, Arc<dyn OcrPipeline + Send + Sync>>>,
     pub active_ocr: RwLock<String>,
     pub inpaint_image_cache: RwLock<Option<Arc<DynamicImage>>>,

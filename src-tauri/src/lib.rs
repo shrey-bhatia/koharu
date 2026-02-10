@@ -384,7 +384,7 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
     app.manage(AppState {
         comic_text_detector: Mutex::new(comic_text_detector),
         lama: Mutex::new(lama),
-        gpu_init_result: Mutex::new(init_result),
+        gpu_init_result: RwLock::new(init_result),
         ocr_pipelines: RwLock::new(ocr_pipelines),
         active_ocr: RwLock::new(default_active_key),
         inpaint_image_cache: RwLock::new(None),

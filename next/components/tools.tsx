@@ -12,7 +12,7 @@ import { useEditorStore } from '@/lib/state'
 function Tools() {
   const { tool: selectedTool, setTool: setSelectedTool } = useEditorStore()
 
-  const tools = [
+  const tools: { id: 'detection' | 'translation' | 'inpaint' | 'render' | 'segmentation'; icon: typeof MessageCircle; description: string }[] = [
     {
       id: 'detection',
       icon: MessageCircle,

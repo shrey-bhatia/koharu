@@ -7,24 +7,28 @@ import { TextBlock, RGB, AppearanceMetadata, ColorPalette, MaskStats } from '@/l
  * This module runs after detection and provides rich metadata for high-fidelity rendering.
  */
 
-const MASK_SIZE = 1024 // Segmentation mask is always 1024x1024
-
 /**
- * Analyze appearance for all text blocks using the segmentation mask
+ * Analyze appearance for all text blocks using the segmentation mask.
+ * The mask dimensions match the original image (passed via maskWidth/maskHeight).
  */
 export async function analyzeTextAppearance(
   image: ImageBitmap,
-  mask: Uint8Array, // 1024x1024 grayscale segmentation mask
-  textBlocks: TextBlock[]
+  mask: Uint8Array, // grayscale segmentation mask at original image dimensions
+  textBlocks: TextBlock[],
+  maskWidth?: number,
+  maskHeight?: number
 ): Promise<TextBlock[]> {
+  // Derive mask dimensions: prefer explicit params, then image dims, then sqrt fallback
+  const mw = maskWidth ?? image.width
+  const mh = maskHeight ?? image.height
   return Promise.all(
     textBlocks.map(async (block) => {
       if (block.appearanceAnalyzed) {
         return block // Skip if already analyzed
       }
 
-      const appearance = await analyzeBlock(image, mask, block)
-      const maskStats = await analyzeMaskGeometry(mask, block, image.width, image.height)
+      const appearance = await analyzeBlock(image, mask, block, mw, mh)
+      const maskStats = await analyzeMaskGeometry(mask, block, image.width, image.height, mw, mh)
 
       return {
         ...block,
@@ -42,18 +46,20 @@ export async function analyzeTextAppearance(
 async function analyzeBlock(
   image: ImageBitmap,
   mask: Uint8Array,
-  block: TextBlock
+  block: TextBlock,
+  maskWidth: number,
+  maskHeight: number
 ): Promise<AppearanceMetadata> {
   // Extract local mask region for this block
-  const localMask = extractLocalMask(mask, block, image.width, image.height)
+  const { data: localMask, width: localW, height: localH } = extractLocalMask(mask, block, image.width, image.height, maskWidth, maskHeight)
 
   // Process mask to get text core and background regions
-  const { textCore, background, outlineShell } = processMaskRegions(localMask)
+  const { textCore, background, outlineShell } = processMaskRegions(localMask, localW, localH)
 
   // Sample colors from the original image
-  const textColorResult = await sampleTextColor(image, block, textCore)
-  const backgroundColorResult = await sampleBackgroundColor(image, block, background)
-  const outlineResult = await detectOutline(image, block, outlineShell)
+  const textColorResult = await sampleTextColor(image, block, textCore, localW, localH)
+  const backgroundColorResult = await sampleBackgroundColor(image, block, background, localW, localH)
+  const outlineResult = await detectOutline(image, block, outlineShell, localW, localH)
 
   // Calculate overall confidence
   const confidence = Math.min(
@@ -80,10 +86,12 @@ function extractLocalMask(
   fullMask: Uint8Array,
   block: TextBlock,
   imageWidth: number,
-  imageHeight: number
-): Uint8Array {
-  const scaleX = MASK_SIZE / imageWidth
-  const scaleY = MASK_SIZE / imageHeight
+  imageHeight: number,
+  maskW: number,
+  maskH: number
+): { data: Uint8Array; width: number; height: number } {
+  const scaleX = maskW / imageWidth
+  const scaleY = maskH / imageHeight
 
   // Map block coords to mask space
   const maskXmin = Math.floor(block.xmin * scaleX)
@@ -91,33 +99,31 @@ function extractLocalMask(
   const maskXmax = Math.ceil(block.xmax * scaleX)
   const maskYmax = Math.ceil(block.ymax * scaleY)
 
-  const maskWidth = maskXmax - maskXmin
-  const maskHeight = maskYmax - maskYmin
+  const localWidth = maskXmax - maskXmin
+  const localHeight = maskYmax - maskYmin
 
-  const localMask = new Uint8Array(maskWidth * maskHeight)
+  const localMask = new Uint8Array(localWidth * localHeight)
 
-  for (let y = 0; y < maskHeight; y++) {
-    for (let x = 0; x < maskWidth; x++) {
-      const maskX = Math.min(maskXmin + x, MASK_SIZE - 1)
-      const maskY = Math.min(maskYmin + y, MASK_SIZE - 1)
-      const maskIdx = maskY * MASK_SIZE + maskX
-      localMask[y * maskWidth + x] = fullMask[maskIdx] || 0
+  for (let y = 0; y < localHeight; y++) {
+    for (let x = 0; x < localWidth; x++) {
+      const srcX = Math.min(maskXmin + x, maskW - 1)
+      const srcY = Math.min(maskYmin + y, maskH - 1)
+      const maskIdx = srcY * maskW + srcX
+      localMask[y * localWidth + x] = fullMask[maskIdx] || 0
     }
   }
 
-  return localMask
+  return { data: localMask, width: localWidth, height: localHeight }
 }
 
 /**
  * Process mask to identify text core, background, and outline regions
  */
-function processMaskRegions(mask: Uint8Array): {
+function processMaskRegions(mask: Uint8Array, width: number, height: number): {
   textCore: Uint8Array
   background: Uint8Array
   outlineShell: Uint8Array
 } {
-  const width = Math.sqrt(mask.length)
-  const height = width
 
   // Binary threshold
   const threshold = 30
@@ -197,9 +203,11 @@ function erode(mask: Uint8Array, width: number, height: number, radius: number):
 async function sampleTextColor(
   image: ImageBitmap,
   block: TextBlock,
-  textCore: Uint8Array
+  textCore: Uint8Array,
+  maskW: number,
+  maskH: number
 ): Promise<{ color: RGB; palette: ColorPalette[]; confidence: number }> {
-  const samples = await samplePixels(image, block, textCore)
+  const samples = await samplePixels(image, block, textCore, maskW, maskH)
 
   if (samples.length === 0) {
     // Fallback to detection class
@@ -219,9 +227,11 @@ async function sampleTextColor(
 async function sampleBackgroundColor(
   image: ImageBitmap,
   block: TextBlock,
-  background: Uint8Array
+  background: Uint8Array,
+  maskW: number,
+  maskH: number
 ): Promise<{ color: RGB; palette: ColorPalette[]; confidence: number }> {
-  const samples = await samplePixels(image, block, background)
+  const samples = await samplePixels(image, block, background, maskW, maskH)
 
   if (samples.length === 0) {
     return { color: { r: 255, g: 255, b: 255 }, palette: [], confidence: 0.3 }
@@ -239,9 +249,11 @@ async function sampleBackgroundColor(
 async function detectOutline(
   image: ImageBitmap,
   block: TextBlock,
-  outlineShell: Uint8Array
+  outlineShell: Uint8Array,
+  maskW: number,
+  maskH: number
 ): Promise<{ color: RGB; widthPx: number; confidence: number } | null> {
-  const samples = await samplePixels(image, block, outlineShell)
+  const samples = await samplePixels(image, block, outlineShell, maskW, maskH)
 
   // Minimum coverage threshold
   const shellArea = outlineShell.filter((v) => v > 0).length
@@ -253,8 +265,7 @@ async function detectOutline(
   const confidence = Math.exp(-variance / 1000)
 
   // Estimate outline width from shell thickness
-  const width = Math.sqrt(outlineShell.length)
-  const estimatedWidthPx = Math.max(1, Math.round(shellArea / (4 * width)))
+  const estimatedWidthPx = Math.max(1, Math.round(shellArea / (4 * maskW)))
 
   return { color: dominantColor, widthPx: estimatedWidthPx, confidence }
 }
@@ -265,7 +276,9 @@ async function detectOutline(
 async function samplePixels(
   image: ImageBitmap,
   block: TextBlock,
-  maskRegion: Uint8Array
+  maskRegion: Uint8Array,
+  maskWidth: number,
+  maskHeight: number
 ): Promise<RGB[]> {
   const blockWidth = Math.ceil(block.xmax - block.xmin)
   const blockHeight = Math.ceil(block.ymax - block.ymin)
@@ -291,9 +304,6 @@ async function samplePixels(
   const imageData = ctx.getImageData(0, 0, blockWidth, blockHeight)
   const pixels = imageData.data
 
-  // Resize mask to match block dimensions
-  const maskWidth = Math.sqrt(maskRegion.length)
-  const maskHeight = maskWidth
   const samples: RGB[] = []
 
   for (let y = 0; y < blockHeight; y++) {
@@ -522,11 +532,13 @@ async function analyzeMaskGeometry(
   mask: Uint8Array,
   block: TextBlock,
   imageWidth: number,
-  imageHeight: number
+  imageHeight: number,
+  maskW: number,
+  maskH: number
 ): Promise<MaskStats> {
-  // Extract local mask region
-  const scaleX = MASK_SIZE / imageWidth
-  const scaleY = MASK_SIZE / imageHeight
+  // Map block coordinates to mask space
+  const scaleX = maskW / imageWidth
+  const scaleY = maskH / imageHeight
 
   const maskXmin = Math.floor(block.xmin * scaleX)
   const maskYmin = Math.floor(block.ymin * scaleY)
@@ -538,9 +550,9 @@ async function analyzeMaskGeometry(
   let sumX = 0
   let sumY = 0
 
-  for (let y = maskYmin; y < maskYmax && y < MASK_SIZE; y++) {
-    for (let x = maskXmin; x < maskXmax && x < MASK_SIZE; x++) {
-      const idx = y * MASK_SIZE + x
+  for (let y = maskYmin; y < maskYmax && y < maskH; y++) {
+    for (let x = maskXmin; x < maskXmax && x < maskW; x++) {
+      const idx = y * maskW + x
       if (mask[idx] > 30) {
         points.push([x, y])
         sumX += x

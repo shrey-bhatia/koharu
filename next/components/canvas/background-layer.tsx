@@ -17,7 +17,7 @@ export const BackgroundLayer = () => {
     if (tool === 'render' || tool === 'inpaint') {
       // In render/inpaint modes, respect the pipeline stage
       if (currentStage === 'final' && pipelineStages.final) return pipelineStages.final.bitmap
-      if (currentStage === 'rectangles' && pipelineStages.withRectangles) return pipelineStages.withRectangles.bitmap
+      if (currentStage === 'withRectangles' && pipelineStages.withRectangles) return pipelineStages.withRectangles.bitmap
       if (currentStage === 'textless' && pipelineStages.textless) return pipelineStages.textless.bitmap
     }
     // Default to original image
