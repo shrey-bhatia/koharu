@@ -22,7 +22,7 @@ export default function RootLayout({
         className={`${notoSansJP.className} ${notoSansSC.className} antialiased`}
         suppressHydrationWarning
       >
-        <Theme accentColor='ruby'>{children}</Theme>
+        <Theme accentColor='ruby' appearance='inherit'>{children}</Theme>
       </body>
     </html>
   )

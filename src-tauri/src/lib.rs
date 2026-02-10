@@ -169,6 +169,7 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
     }
 
     // Initialize ORT with ONLY the requested provider (no silent fallback)
+    tracing::info!("Initializing ONNX Runtime...");
     match gpu_pref.as_str() {
         "cuda" => {
             #[cfg(feature = "cuda")]
@@ -177,6 +178,9 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
                     .with_execution_providers([
                         ort::execution_providers::CUDAExecutionProvider::default()
                             .with_device_id(device_id as i32)
+                            .with_conv_algorithm_search(
+                                ort::execution_providers::cuda::CuDNNConvAlgorithmSearch::Heuristic,
+                            )
                             .build()
                             .error_on_failure(), // CRITICAL: Fail hard if CUDA unavailable
                     ])
@@ -216,12 +220,33 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
         }
     }
 
-    // Load models
-    let comic_text_detector = ComicTextDetector::new()?;
-    let mut lama = Lama::new()?;
+    // Load ComicTextDetector on a blocking thread with timeout.
+    // hf_hub::api::sync::Api does HTTP HEAD requests which can hang if HuggingFace
+    // is unreachable. spawn_blocking + timeout prevents this from freezing the app.
+    tracing::info!("Loading ComicTextDetector model...");
+    let comic_text_detector = tokio::time::timeout(
+        tokio::time::Duration::from_secs(120),
+        tokio::task::spawn_blocking(|| ComicTextDetector::new()),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("ComicTextDetector loading timed out after 120s"))?
+    .map_err(|e| anyhow::anyhow!("ComicTextDetector task panicked: {}", e))??;
+    tracing::info!("✓ ComicTextDetector loaded");
+
+    // Load LaMa inpainting model (same pattern)
+    tracing::info!("Loading LaMa inpainting model...");
+    let mut lama = tokio::time::timeout(
+        tokio::time::Duration::from_secs(120),
+        tokio::task::spawn_blocking(|| Lama::new()),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("LaMa loading timed out after 120s"))?
+    .map_err(|e| anyhow::anyhow!("LaMa task panicked: {}", e))??;
+    tracing::info!("✓ LaMa loaded");
 
     let mut ocr_pipelines: HashMap<String, Arc<dyn OcrPipeline + Send + Sync>> = HashMap::new();
 
+    tracing::info!("Loading PaddleOCR pipeline from {:?}...", model_dir);
     match PaddleOcrPipeline::new(&model_dir, ocr_device_config).await {
         Ok(ocr_pipeline) => {
             ocr_pipelines.insert(
@@ -244,62 +269,95 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
         }
     }
 
-    match MangaOCR::new() {
-        Ok(manga_ocr) => {
+    // Initialize MangaOCR with a timeout to prevent hanging on HuggingFace downloads
+    // HuggingFace model downloads can be slow or stall - use a 30 second timeout
+    tracing::info!("Loading MangaOCR model...");
+    let manga_ocr_timeout = tokio::time::timeout(
+        tokio::time::Duration::from_secs(30),
+        tokio::task::spawn_blocking(|| MangaOCR::new()),
+    )
+    .await;
+
+    match manga_ocr_timeout {
+        Ok(Ok(Ok(manga_ocr))) => {
             let manga_pipeline =
                 Arc::new(MangaOcrPipeline::new(manga_ocr)) as Arc<dyn OcrPipeline + Send + Sync>;
             ocr_pipelines.insert(MANGA_OCR_KEY.to_string(), manga_pipeline);
             tracing::info!("✓ MangaOCR pipeline registered (key={})", MANGA_OCR_KEY);
         }
-        Err(err) => {
+        Ok(Ok(Err(err))) => {
             tracing::warn!(
-                "MangaOCR initialization failed. Fallback engine unavailable: {}",
+                "MangaOCR initialization failed (models not downloaded yet): {}",
                 err
             );
+            tracing::info!("MangaOCR will be unavailable until models are cached from HuggingFace");
+        }
+        Ok(Err(join_err)) => {
+            tracing::warn!("MangaOCR initialization task panicked: {}", join_err);
+        }
+        Err(_timeout_err) => {
+            tracing::warn!(
+                "MangaOCR initialization timed out after 30s - HuggingFace download likely stalled"
+            );
+            tracing::info!("Start the app again after models finish downloading, or disable MangaOCR");
         }
     }
 
-    // Run warmup profiling to verify GPU is actually used
-    tracing::info!("Running warmup profiling...");
-    let start = std::time::Instant::now();
-
-    // Create dummy 512x512 input for LaMa warmup
+    // Run two-pass warmup profiling to verify GPU is actually used.
+    // The first inference pays for CUDA JIT compilation + cuDNN algorithm selection,
+    // so it's always slow. The SECOND inference reveals true GPU performance.
+    tracing::info!("Running warmup profiling (2 iterations)...");
     let dummy_image = image::DynamicImage::new_rgb8(512, 512);
     let dummy_mask = image::DynamicImage::new_luma8(512, 512);
 
-    // Warmup inference (ignore result)
-    let _ = lama.inference(&dummy_image, &dummy_mask);
+    let warmup_result = tokio::task::spawn_blocking(move || {
+        // First inference: pays CUDA JIT + cuDNN autotuning cost
+        let start1 = std::time::Instant::now();
+        let _ = lama.inference(&dummy_image, &dummy_mask);
+        let first_ms = start1.elapsed().as_millis() as u32;
 
-    let duration = start.elapsed();
-    init_result.warmup_time_ms = duration.as_millis() as u32;
+        // Second inference: should be fast if GPU is working
+        let start2 = std::time::Instant::now();
+        let _ = lama.inference(&dummy_image, &dummy_mask);
+        let second_ms = start2.elapsed().as_millis() as u32;
 
-    tracing::info!("Warmup completed in {}ms", init_result.warmup_time_ms);
+        (lama, first_ms, second_ms)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("Warmup task panicked: {}", e))?;
 
-    // Detect potential CPU fallback based on warmup latency
-    // Note: First run (cold start) can be slower than subsequent runs
-    // CUDA: typically <500ms after warmup, but first run can be ~1000ms
-    // DirectML: typically <1000ms after warmup, but first run can be ~1500ms
-    let expected_max_time = match gpu_pref.as_str() {
-        "cuda" => 1500,     // CUDA warmup (includes model loading)
-        "directml" => 2000, // DirectML warmup (includes model loading)
-        "cpu" => u32::MAX,  // CPU is expected to be slow
+    let (lama_out, first_ms, second_ms) = warmup_result;
+    lama = lama_out;
+    init_result.warmup_time_ms = second_ms; // Report the warm (representative) timing
+
+    tracing::info!(
+        "Warmup: 1st={}ms (cold JIT), 2nd={}ms (warm)",
+        first_ms,
+        second_ms
+    );
+
+    // Detect CPU fallback by checking the WARM (second) inference time
+    let max_warm_time = match gpu_pref.as_str() {
+        "cuda" => 500,      // CUDA warm inference should be <500ms
+        "directml" => 1200, // DirectML warm inference should be <1200ms
+        "cpu" => u32::MAX,
         _ => u32::MAX,
     };
 
-    if init_result.warmup_time_ms > expected_max_time {
+    if second_ms > max_warm_time {
         tracing::warn!(
-            "⚠️  Warmup took {}ms (expected <{}ms) - possible CPU fallback!",
-            init_result.warmup_time_ms,
-            expected_max_time
+            "⚠️  Warm inference took {}ms (expected <{}ms) - likely CPU fallback!",
+            second_ms,
+            max_warm_time
         );
         init_result.active_provider =
             format!("{} (possible CPU fallback)", init_result.active_provider);
-        init_result.success = false; // Mark as failed
+        init_result.success = false;
     } else {
         tracing::info!(
-            "✓ GPU acceleration verified: {}ms warmup (expected <{}ms)",
-            init_result.warmup_time_ms,
-            expected_max_time
+            "✓ GPU verified: {}ms warm inference (cold start was {}ms due to JIT/autotuning)",
+            second_ms,
+            first_ms
         );
     }
 
@@ -334,9 +392,18 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
         ocr_image_cache: RwLock::new(None),
     });
 
-    app.get_webview_window("splashscreen").unwrap().close()?;
-    app.get_webview_window("main").unwrap().show()?;
+    // Transition from splash screen to main window
+    tracing::info!("Initialization complete, transitioning to main window...");
+    if let Some(splash) = app.get_webview_window("splashscreen") {
+        let _ = splash.close();
+    }
+    if let Some(main_window) = app.get_webview_window("main") {
+        main_window.show()?;
+    } else {
+        return Err(anyhow::anyhow!("Main window not found - cannot show application"));
+    }
 
+    tracing::info!("✓ Application ready");
     Ok(())
 }
 
@@ -350,14 +417,41 @@ pub fn run() -> anyhow::Result<()> {
             let app_handle = app.handle().clone();
             spawn({
                 async move {
-                    if let Err(e) = initialize(app_handle.clone()).await {
-                        app_handle
-                            .dialog()
-                            .message(format!("Failed to initialize: {}", e))
-                            .title("Error")
-                            .kind(MessageDialogKind::Error)
-                            .blocking_show();
-                        std::process::exit(1);
+                    // Catch both errors AND panics from initialization
+                    let result = std::panic::AssertUnwindSafe(initialize(app_handle.clone()));
+                    let result = futures::FutureExt::catch_unwind(result).await;
+
+                    match result {
+                        Ok(Ok(())) => {
+                            tracing::info!("Initialization completed successfully");
+                        }
+                        Ok(Err(e)) => {
+                            tracing::error!("Initialization failed: {}", e);
+                            app_handle
+                                .dialog()
+                                .message(format!("Failed to initialize: {}", e))
+                                .title("Initialization Error")
+                                .kind(MessageDialogKind::Error)
+                                .blocking_show();
+                            std::process::exit(1);
+                        }
+                        Err(panic_err) => {
+                            let msg = if let Some(s) = panic_err.downcast_ref::<String>() {
+                                s.clone()
+                            } else if let Some(s) = panic_err.downcast_ref::<&str>() {
+                                s.to_string()
+                            } else {
+                                "Unknown panic during initialization".to_string()
+                            };
+                            tracing::error!("Initialization panicked: {}", msg);
+                            app_handle
+                                .dialog()
+                                .message(format!("Initialization crashed: {}", msg))
+                                .title("Fatal Error")
+                                .kind(MessageDialogKind::Error)
+                                .blocking_show();
+                            std::process::exit(1);
+                        }
                     }
                 }
             });

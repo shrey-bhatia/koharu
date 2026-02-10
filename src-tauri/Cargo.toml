@@ -41,7 +41,7 @@ tokio-stream = "0.1"  # Stream utilities for debouncing
 futures = "0.3"  # Future utilities
 sha2 = "0.10"  # SHA-256 checksums for model validation
 unicode-segmentation = "1.10"  # Text segmentation for CER/WER calculation
-ndarray = "0.15"  # N-dimensional arrays for tensor operations
+ndarray = { workspace = true }  # N-dimensional arrays for tensor operations
 async-trait = "0.1"  # Async traits
 
 # internal dependencies

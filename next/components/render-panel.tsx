@@ -4,8 +4,6 @@ import { useState, useEffect } from 'react'
 import { Button, Callout, Progress, Select, Badge, Text } from '@radix-ui/themes'
 import { Play, Download, AlertCircle, CheckCircle } from 'lucide-react'
 import { useEditorStore } from '../lib/state'
-
-      // Step 2: Get the correct base image} from '@/lib/state'
 import { extractBackgroundColor } from '@/utils/color-extraction'
 import { ensureReadableContrast } from '@/utils/wcag-contrast'
 import { calculateOptimalFontSize } from '@/utils/font-sizing'

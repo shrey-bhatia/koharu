@@ -1,0 +1,15 @@
+# Build optimization configuration for Koharu
+# See: https://doc.rust-lang.org/cargo/reference/config.html
+
+# sccache is installed and enabled!
+# sccache dramatically speeds up incremental and clean rebuilds by caching
+# compiled artifacts. On repeat builds, compilation drops from minutes to seconds.
+
+[build]
+rustc-wrapper = "sccache"
+
+# Note: The [env] section here does NOT modify the system PATH.
+# It only sets env vars for `cargo build/run` processes.
+# For cuDNN discovery at RUNTIME, ensure your user/system PATH includes:
+#   C:\Program Files\NVIDIA\CUDNN\v9.11\bin\12.9
+#   C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9\bin

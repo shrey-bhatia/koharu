@@ -353,6 +353,18 @@ export const useEditorStore = create(
     },
     (set) => ({
       setImage: (image: Image | null) => set((state) => {
+        // Close old ImageBitmaps to prevent GPU memory leaks
+        if (state.image?.bitmap) {
+          try { state.image.bitmap.close() } catch (_) { /* already closed */ }
+        }
+        if (state.inpaintedImage?.bitmap) {
+          try { state.inpaintedImage.bitmap.close() } catch (_) { /* already closed */ }
+        }
+        for (const stage of Object.values(state.pipelineStages)) {
+          if (stage?.bitmap) {
+            try { stage.bitmap.close() } catch (_) { /* already closed */ }
+          }
+        }
         if (state.segmentationMaskBitmap) {
           try {
             state.segmentationMaskBitmap.close()
@@ -460,7 +472,13 @@ export const useEditorStore = create(
           return { segmentationMaskBitmap: bitmap }
         }),
       setShowSegmentationMask: (show: boolean) => set({ showSegmentationMask: show }),
-      setInpaintedImage: (image: Image | null) => set({ inpaintedImage: image }),
+      setInpaintedImage: (image: Image | null) => set((state) => {
+        // Close old bitmap to prevent GPU memory leak
+        if (state.inpaintedImage?.bitmap && state.inpaintedImage.bitmap !== image?.bitmap) {
+          try { state.inpaintedImage.bitmap.close() } catch (_) { /* already closed */ }
+        }
+        return { inpaintedImage: image }
+      }),
       setTheme: (theme: 'light' | 'dark') => {
         if (typeof window !== 'undefined') {
           localStorage.setItem('theme', theme)
@@ -490,9 +508,16 @@ export const useEditorStore = create(
       },
       setCurrentStage: (stage: 'original' | 'textless' | 'rectangles' | 'final') => set({ currentStage: stage }),
       setPipelineStage: (stage: 'original' | 'textless' | 'withRectangles' | 'final', image: Image | null) =>
-        set((state) => ({
-          pipelineStages: { ...state.pipelineStages, [stage]: image },
-        })),
+        set((state) => {
+          // Close old bitmap for this stage to prevent GPU memory leak
+          const old = state.pipelineStages[stage]
+          if (old?.bitmap && old.bitmap !== image?.bitmap) {
+            try { old.bitmap.close() } catch (_) { /* already closed */ }
+          }
+          return {
+            pipelineStages: { ...state.pipelineStages, [stage]: image },
+          }
+        }),
       setInpaintingPreset: (preset: 'fast' | 'balanced' | 'quality') =>
         set({
           inpaintingConfig: INPAINTING_PRESETS[preset],

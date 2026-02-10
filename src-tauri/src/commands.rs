@@ -1112,9 +1112,9 @@ pub fn get_gpu_devices() -> CommandResult<Vec<GpuDevice>> {
 }
 
 #[tauri::command]
-pub fn get_current_gpu_status(app: AppHandle) -> CommandResult<crate::state::GpuInitResult> {
+pub async fn get_current_gpu_status(app: AppHandle) -> CommandResult<crate::state::GpuInitResult> {
     let state = app.state::<AppState>();
-    let init_result = state.gpu_init_result.blocking_lock();
+    let init_result = state.gpu_init_result.lock().await;
     Ok(init_result.clone())
 }
 

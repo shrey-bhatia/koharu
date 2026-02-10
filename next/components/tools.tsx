@@ -4,7 +4,6 @@ import {
   Languages,
   MessageCircle,
   PaintbrushVertical,
-  SquareDashedMousePointer,
   Type,
 } from 'lucide-react'
 import { IconButton } from '@radix-ui/themes'
@@ -18,11 +17,6 @@ function Tools() {
       id: 'detection',
       icon: MessageCircle,
       description: 'Detect text blocks in the image',
-    },
-    {
-      id: 'segmentation',
-      icon: SquareDashedMousePointer,
-      description: 'Segment text blocks',
     },
     {
       id: 'inpaint',
