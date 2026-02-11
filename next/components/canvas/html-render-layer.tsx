@@ -16,7 +16,7 @@ interface HtmlRenderLayerProps {
 export const HtmlRenderLayer = forwardRef<HtmlRenderLayerHandle, HtmlRenderLayerProps>(
   ({ stageScale, stagePos }, ref) => {
   const { tool, currentStage, textBlocks } = useEditorStore()
-  const showLayer = tool === 'render' && currentStage === 'final'
+  const showLayer = tool === 'render' && (currentStage === 'final' || currentStage === 'textless')
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Expose imperative sync method so the parent canvas can push transform updates
@@ -30,11 +30,12 @@ export const HtmlRenderLayer = forwardRef<HtmlRenderLayerHandle, HtmlRenderLayer
   useImperativeHandle(ref, () => ({ syncTransform }), [syncTransform])
 
   // Keep DOM in sync when React state updates (non-drag path: zoom buttons, fit, etc.)
+  // Also runs when `showLayer` flips true (component mount) to ensure initial positioning.
   useEffect(() => {
     if (containerRef.current) {
       containerRef.current.style.transform = `translate(${stagePos.x}px, ${stagePos.y}px) scale(${stageScale})`
     }
-  }, [stagePos.x, stagePos.y, stageScale])
+  }, [stagePos.x, stagePos.y, stageScale, showLayer])
 
   if (!showLayer) return null
 
@@ -42,6 +43,7 @@ export const HtmlRenderLayer = forwardRef<HtmlRenderLayerHandle, HtmlRenderLayer
     <div
       ref={containerRef}
       style={{
+        transform: `translate(${stagePos.x}px, ${stagePos.y}px) scale(${stageScale})`,
         transformOrigin: 'top left',
         width: '100%',
         height: '100%',
@@ -104,20 +106,7 @@ export const HtmlRenderLayer = forwardRef<HtmlRenderLayerHandle, HtmlRenderLayer
               height: `${height}px`,
               writingMode: isVertical ? 'vertical-rl' : 'horizontal-tb',
               
-              // Font styles handled by SmartFitText now
-              // fontFamily: fontFamily,
-              // fontSize: `${fontSize}px`,
-              // color: `rgb(${color.r}, ${color.g}, ${color.b})`,
-              // lineHeight: block.lineHeight || 1.2,
-              // letterSpacing: `${block.letterSpacing || 0}px`,
-              // textAlign: 'center',
-              // whiteSpace: 'pre-wrap', // Allow manual line breaks
-              // textShadow: textShadow,
-              
-              // "Inked" look
-              mixBlendMode: 'multiply', 
-              
-              // overflow: 'hidden', // Handled by SmartFitText
+              // No mixBlendMode — this is the sole text renderer, not an overlay on baked text.
             }}
           >
             <SmartFitText
@@ -125,6 +114,7 @@ export const HtmlRenderLayer = forwardRef<HtmlRenderLayerHandle, HtmlRenderLayer
               width={width}
               height={height}
               isVertical={isVertical}
+              fixedFontSize={block.fontSize}
               style={{
                 fontFamily: fontFamily,
                 color: `rgb(${color.r}, ${color.g}, ${color.b})`,

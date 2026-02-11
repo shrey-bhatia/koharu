@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Button, Callout, Progress, Select, Badge, Text } from '@radix-ui/themes'
 import { Play, Download, AlertCircle, CheckCircle } from 'lucide-react'
 import { useEditorStore } from '../lib/state'
@@ -69,6 +69,35 @@ export default function RenderPanel() {
   useEffect(() => {
     loadGpuStatus()
   }, [])
+
+  // Debounced clean base regeneration when background colors change (rectangle mode only).
+  // For LaMa/NewLaMa modes, the clean base is just the inpainted image and never changes,
+  // so font/color tweaks in render-customization are truly instant (HtmlRenderLayer handles text).
+  const regenerateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const bgColorFingerprint = renderMethod === 'rectangle'
+    ? textBlocks.map(b => {
+        const bg = b.manualBgColor || b.backgroundColor
+        return bg ? `${bg.r},${bg.g},${bg.b}` : ''
+      }).join('|')
+    : ''
+
+  useEffect(() => {
+    // Only regenerate if we're in final stage and have processed blocks
+    const hasProcessed = textBlocks.some(b => b.backgroundColor)
+    if (!hasProcessed || !pipelineStages.final) return
+
+    if (regenerateTimerRef.current) clearTimeout(regenerateTimerRef.current)
+    regenerateTimerRef.current = setTimeout(() => {
+      if (renderMethod === 'rectangle') {
+        console.log('[REACTIVE] Background color changed, regenerating clean base')
+        generateCleanBase()
+      }
+    }, 300) // 300ms debounce
+
+    return () => {
+      if (regenerateTimerRef.current) clearTimeout(regenerateTimerRef.current)
+    }
+  }, [bgColorFingerprint]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadGpuStatus = async () => {
     try {
@@ -230,8 +259,9 @@ export default function RenderPanel() {
       setProgress(1)
       setTextBlocks(updated)
 
-      // Generate final composition and save as pipeline stage
-      await generateFinalComposition()
+      // Generate clean base (no text baked in) — text is rendered live by HtmlRenderLayer.
+      // Pass `updated` explicitly because setTextBlocks hasn't propagated yet (stale closure).
+      await generateCleanBase(updated)
 
       // Switch to render tool and 'final' stage to show live preview with rendered text
       setTool('render')
@@ -252,109 +282,47 @@ export default function RenderPanel() {
 
       if (!image) return
 
-      // DEBUG: Extensive logging for export process debugging
-      // Uncomment to enable detailed export logging
-      /*
-      console.log('[EXPORT] Starting Rust-based export')
-      console.log('[EXPORT] Render method:', renderMethod)
-      console.log('[EXPORT] Text blocks:', textBlocks.length)
-      textBlocks.forEach((block, i) => {
-        console.log(`[EXPORT] Block ${i}:`)
-        console.log(`  - Original text: '${block.text || 'NULL'}'`)
-        console.log(`  - Translated text: '${block.translatedText || 'NULL'}'`)
-        console.log(`  - Font size: ${block.fontSize || 'NULL'}`)
-        console.log(`  - Text color: ${block.textColor ? `rgb(${block.textColor.r},${block.textColor.g},${block.textColor.b})` : 'NULL'}`)
-        console.log(`  - Background color: ${block.backgroundColor ? `rgb(${block.backgroundColor.r},${block.backgroundColor.g},${block.backgroundColor.b})` : 'NULL'}`)
-        console.log(`  - Manual text color: ${block.manualTextColor ? `rgb(${block.manualTextColor.r},${block.manualTextColor.g},${block.manualTextColor.b})` : 'NULL'}`)
-        console.log(`  - Manual bg color: ${block.manualBgColor ? `rgb(${block.manualBgColor.r},${block.manualBgColor.g},${block.manualBgColor.b})` : 'NULL'}`)
-        console.log(`  - Font family: '${block.fontFamily || 'NULL'}'`)
-        console.log(`  - Font weight: '${block.fontWeight || 'NULL'}'`)
-        console.log(`  - Font stretch: '${block.fontStretch || 'NULL'}'`)
-        console.log(`  - Letter spacing: ${block.letterSpacing || 'NULL'}`)
-        console.log(`  - Line height: ${block.lineHeight || 'NULL'}`)
-        console.log(`  - Appearance: ${block.appearance ? 'PRESENT' : 'NULL'}`)
-        console.log(`  - BBox: [${block.xmin}, ${block.ymin}, ${block.xmax}, ${block.ymax}]`)
-      })
-      */
+      console.log('[EXPORT] Starting Canvas 2D export (matches preview)')
 
-      // Step 1: Get the correct base image
+      // Step 1: Get the clean base image (same as preview uses)
       const baseImageBitmap = getBaseImageForExport()
-      // DEBUG: Log base image dimensions
-      // console.log('[EXPORT] Base image:', baseImageBitmap.width, 'x', baseImageBitmap.height)
 
-      // Step 2: Convert ImageBitmap to buffer for Rust
-      const canvas = new OffscreenCanvas(baseImageBitmap.width, baseImageBitmap.height)
-      const ctx = canvas.getContext('2d')!
+      // Step 2: Create canvas at full resolution and draw base
+      const { canvas, ctx } = createCanvas(baseImageBitmap.width, baseImageBitmap.height)
       ctx.drawImage(baseImageBitmap, 0, 0)
-      const blob = await canvas.convertToBlob({ type: 'image/png' })
-      const arrayBuffer = await blob.arrayBuffer()
-      const baseImageBuffer = Array.from(new Uint8Array(arrayBuffer))
 
-      // Step 3: Prepare text blocks for Rust (match Rust struct exactly)
-      const textBlocksForRust = textBlocks.map(block => ({
-        xmin: block.xmin,
-        ymin: block.ymin,
-        xmax: block.xmax,
-        ymax: block.ymax,
-        translatedText: block.translatedText || null,
-        fontSize: block.fontSize || null,
-        textColor: block.textColor || null,
-        backgroundColor: block.backgroundColor || null,
-        manualBgColor: block.manualBgColor || null,
-        manualTextColor: block.manualTextColor || null,
-        fontFamily: block.fontFamily || null,
-        fontWeight: block.fontWeight || null,
-        fontStretch: block.fontStretch || null,
-        letterSpacing: block.letterSpacing || null,
-        lineHeight: block.lineHeight || null,
-        appearance: block.appearance ? {
-          sourceOutlineColor: block.appearance.sourceOutlineColor || null,
-          outlineWidthPx: block.appearance.outlineWidthPx || null,
-        } : null,
-      }))
+      // Step 3: Draw background rectangles for Rectangle Fill mode
+      if (renderMethod === 'rectangle') {
+        for (const block of textBlocks) {
+          if (!block.backgroundColor) continue
+          const bg = block.manualBgColor || block.backgroundColor
+          const x = block.xmin
+          const y = block.ymin
+          const width = block.xmax - block.xmin
+          const height = block.ymax - block.ymin
+          const radius = 5
 
-      // DEBUG: Log prepared textBlocks for Rust debugging
-      // Uncomment to enable detailed Rust data structure logging
-      /*
-      console.log('[EXPORT] Prepared textBlocks for Rust:')
-      textBlocksForRust.forEach((block, i) => {
-        console.log(`[EXPORT] Rust Block ${i}:`)
-        console.log(`  - translatedText: '${block.translatedText || 'NULL'}'`)
-        console.log(`  - fontSize: ${block.fontSize || 'NULL'}`)
-        console.log(`  - textColor: ${block.textColor ? `rgb(${block.textColor.r},${block.textColor.g},${block.textColor.b})` : 'NULL'}`)
-        console.log(`  - backgroundColor: ${block.backgroundColor ? `rgb(${block.backgroundColor.r},${block.backgroundColor.g},${block.backgroundColor.b})` : 'NULL'}`)
-        console.log(`  - BBox: [${block.xmin}, ${block.ymin}, ${block.xmax}, ${block.ymax}]`)
-      })
-      */
+          ctx.fillStyle = `rgb(${bg.r}, ${bg.g}, ${bg.b})`
+          ctx.beginPath()
+          ctx.moveTo(x + radius, y)
+          ctx.lineTo(x + width - radius, y)
+          ctx.quadraticCurveTo(x + width, y, x + width, y + radius)
+          ctx.lineTo(x + width, y + height - radius)
+          ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height)
+          ctx.lineTo(x + radius, y + height)
+          ctx.quadraticCurveTo(x, y + height, x, y + height - radius)
+          ctx.lineTo(x, y + radius)
+          ctx.quadraticCurveTo(x, y, x + radius, y)
+          ctx.closePath()
+          ctx.fill()
+        }
+      }
 
-      // Show debug info in UI alert for testing
-      // DEBUG: UI alert showing TextBlocks data sent to Rust
-      // Uncomment to enable popup showing export data for debugging
-      /*
-      const debugInfo = textBlocksForRust.map((block, i) => 
-        `Block ${i}: translatedText='${block.translatedText || 'NULL'}', fontSize=${block.fontSize || 'NULL'}`
-      ).join('\n')
-      alert(`DEBUG: TextBlocks being sent to Rust:\n\n${debugInfo}`)
-      */
+      // Step 4: Draw text using Canvas 2D (same algorithm as preview's generateCleanBase family)
+      drawTextOnCanvas(ctx, textBlocks)
 
-      // DEBUG: Log Rust function call
-      // console.log('[EXPORT] Calling Rust render_and_export_image...')
-
-      // Step 4: Call Rust backend
-      const pngBuffer: number[] = await invoke('render_and_export_image', {
-        request: {
-          baseImageBuffer,
-          textBlocks: textBlocksForRust,
-          renderMethod,
-          defaultFont,
-        },
-      })
-
-      // DEBUG: Log completion and buffer size
-      // console.log('[EXPORT] Rust rendering complete, buffer size:', pngBuffer.length)
-
-      // Step 5: Convert buffer to Blob and save
-      const exportBlob = new Blob([new Uint8Array(pngBuffer)], { type: 'image/png' })
+      // Step 5: Convert to blob and save
+      const exportBlob = await canvasToBlob(canvas, { type: 'image/png', quality: 1.0 })
 
       await fileSave(exportBlob, {
         fileName: `translated-manga-${Date.now()}.png`,
@@ -369,37 +337,41 @@ export default function RenderPanel() {
     }
   }
 
-  // Generate final composition and save as pipeline stage
-  const generateFinalComposition = async () => {
+  // Generate the clean base image (inpainted/original + background rectangles).
+  // Text is NOT drawn here — it's rendered live by HtmlRenderLayer.
+  // This means any font/color/size change is instantly reflected in the preview
+  // without re-running processColors.
+  //
+  // `blocks` parameter: pass the freshly-updated blocks when calling from processColors,
+  // because setTextBlocks hasn't propagated yet (React batches, closure is stale).
+  // When called from the debounced effect, omit it to use the current store value.
+  const generateCleanBase = async (blocks?: typeof textBlocks) => {
     if (!image) return null
+    const blocksToUse = blocks ?? textBlocks
 
     try {
-      console.log('[FINAL_COMP] Generating final composition')
-      // Create offscreen canvas at original resolution
+      console.log('[CLEAN_BASE] Generating clean base (no text)')
       const { canvas, ctx } = createCanvas(image.bitmap.width, image.bitmap.height)
 
       // Determine base image based on render method
       let baseImage: ImageBitmap
       if (renderMethod === 'lama' || renderMethod === 'newlama') {
-        // LaMa/NewLaMa methods use inpainted image
         baseImage = inpaintedImage?.bitmap || image.bitmap
-        console.log(`[FINAL_COMP] Using ${inpaintedImage ? 'inpainted' : 'original'} image for LaMa/NewLaMa`)
+        console.log(`[CLEAN_BASE] Using ${inpaintedImage ? 'inpainted' : 'original'} image for LaMa/NewLaMa`)
       } else if (renderMethod === 'rectangle') {
-        // Rectangle Fill method uses textless image if available, otherwise original
         baseImage = pipelineStages.textless?.bitmap || image.bitmap
-        console.log(`[FINAL_COMP] Using ${pipelineStages.textless ? 'textless' : 'original'} image for Rectangle Fill`)
+        console.log(`[CLEAN_BASE] Using ${pipelineStages.textless ? 'textless' : 'original'} image for Rectangle Fill`)
       } else {
-        // Fallback to original image
         baseImage = image.bitmap
-        console.log('[FINAL_COMP] Using original image (fallback)')
+        console.log('[CLEAN_BASE] Using original image (fallback)')
       }
 
       // 1. Draw base image (original or textless)
       ctx.drawImage(baseImage, 0, 0)
 
-      // 2. Draw rectangles ONLY for Rectangle Fill mode
+      // 2. Draw background rectangles ONLY for Rectangle Fill mode
       if (renderMethod === 'rectangle') {
-        for (const block of textBlocks) {
+        for (const block of blocksToUse) {
           if (!block.backgroundColor) continue
 
           const bg = block.manualBgColor || block.backgroundColor
@@ -411,8 +383,6 @@ export default function RenderPanel() {
 
           ctx.fillStyle = `rgb(${bg.r}, ${bg.g}, ${bg.b})`
           ctx.beginPath()
-          
-          // Draw rounded rect manually (roundRect not universally supported)
           ctx.moveTo(x + radius, y)
           ctx.lineTo(x + width - radius, y)
           ctx.quadraticCurveTo(x + width, y, x + width, y + radius)
@@ -423,138 +393,113 @@ export default function RenderPanel() {
           ctx.lineTo(x, y + radius)
           ctx.quadraticCurveTo(x, y, x + radius, y)
           ctx.closePath()
-          
           ctx.fill()
         }
       }
 
-      // 3. Draw translated text with Canvas 2D API (simple and reliable)
-      console.log(`[FINAL_COMP] Drawing text for ${textBlocks.length} blocks using Canvas 2D`)
-      
-      for (const block of textBlocks) {
-        if (!block.translatedText || !block.fontSize || !block.textColor) continue
+      // NO text is drawn here — HtmlRenderLayer handles live text preview.
+      // This eliminates the double-rendering bug where text appeared in both
+      // the bitmap and the HTML overlay.
 
-        const textColor = block.manualTextColor || block.textColor
-        const fontFamily = block.fontFamily || defaultFont
-        const fontWeight = block.fontWeight || 'normal'
-        const fontStretch = block.fontStretch || 'normal'
-        const letterSpacing = block.letterSpacing || 0
-        const lineHeightMultiplier = block.lineHeight || 1.2
-
-        ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-
-        // Configure outline if available from appearance analysis
-        const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
-        if (hasOutline) {
-          ctx.strokeStyle = `rgb(${block.appearance.sourceOutlineColor.r}, ${block.appearance.sourceOutlineColor.g}, ${block.appearance.sourceOutlineColor.b})`
-          ctx.lineWidth = block.appearance.outlineWidthPx
-          ctx.lineJoin = 'round'
-          ctx.miterLimit = 2
-        }
-
-        ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
-
-        const boxWidth = block.xmax - block.xmin
-        const boxHeight = block.ymax - block.ymin
-        const maxWidth = boxWidth * 0.9 // 10% padding
-        const centerX = (block.xmin + block.xmax) / 2
-        const centerY = (block.ymin + block.ymax) / 2
-
-        // Helper function to measure text width with manual letter spacing
-        const measureTextWithSpacing = (text: string): number => {
-          if (letterSpacing === 0) {
-            return ctx.measureText(text).width
-          }
-          let totalWidth = 0
-          for (let i = 0; i < text.length; i++) {
-            totalWidth += ctx.measureText(text[i]).width
-            if (i < text.length - 1) totalWidth += letterSpacing
-          }
-          return totalWidth
-        }
-
-        // Helper function to draw text with manual letter spacing
-        const drawTextWithSpacing = (text: string, x: number, y: number, isStroke: boolean = false) => {
-          if (letterSpacing === 0) {
-            // Simple case: no letter spacing, use normal text rendering
-            if (isStroke) {
-              ctx.strokeText(text, x, y, maxWidth)
-            } else {
-              ctx.fillText(text, x, y, maxWidth)
-            }
-            return
-          }
-          
-          // Complex case: manual letter spacing
-          const totalWidth = measureTextWithSpacing(text)
-          let currentX = x - totalWidth / 2
-          
-          for (let i = 0; i < text.length; i++) {
-            const char = text[i]
-            const charWidth = ctx.measureText(char).width
-            const charCenterX = currentX + charWidth / 2
-            
-            if (isStroke) {
-              ctx.strokeText(char, charCenterX, y)
-            } else {
-              ctx.fillText(char, charCenterX, y)
-            }
-            
-            currentX += charWidth + letterSpacing
-          }
-        }
-
-        // Wrap text to fit within box width
-        const words = block.translatedText.split(' ')
-        const lines: string[] = []
-        let currentLine = ''
-
-        for (const word of words) {
-          const testLine = currentLine + (currentLine ? ' ' : '') + word
-          const testWidth = measureTextWithSpacing(testLine)
-
-          if (testWidth > maxWidth && currentLine !== '') {
-            lines.push(currentLine)
-            currentLine = word
-          } else {
-            currentLine = testLine
-          }
-        }
-        if (currentLine) lines.push(currentLine)
-
-        const lineHeight = block.fontSize * lineHeightMultiplier
-        const totalHeight = lines.length * lineHeight
-
-        // Start from top if text is too tall, otherwise center vertically
-        const startY = totalHeight > boxHeight * 0.9
-          ? block.ymin + lineHeight / 2
-          : centerY - ((lines.length - 1) * lineHeight) / 2
-
-        lines.forEach((line, i) => {
-          const y = startY + i * lineHeight
-
-          // Draw outline first (if present)
-          if (hasOutline) {
-            drawTextWithSpacing(line, centerX, y, true) // true = stroke
-          }
-
-          // Then draw fill on top
-          drawTextWithSpacing(line, centerX, y, false) // false = fill
-        })
-      }
-
-      // Save final stage
       const finalBlob = await canvasToBlob(canvas, { type: 'image/png', quality: 1.0 })
       const finalBuffer = await finalBlob.arrayBuffer()
       const finalStage = await createImageFromBuffer(finalBuffer)
       setPipelineStage('final', finalStage)
 
+      console.log('[CLEAN_BASE] Clean base generated successfully')
       return finalStage
     } catch (err) {
-      console.error('Failed to generate final composition:', err)
+      console.error('Failed to generate clean base:', err)
       return null
+    }
+  }
+
+  // Draw text onto a canvas for export — produces the final composited image.
+  // Uses Canvas 2D API which closely matches the HTML/CSS preview rendering.
+  const drawTextOnCanvas = (ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, blocks: typeof textBlocks) => {
+    for (const block of blocks) {
+      if (!block.translatedText || !block.fontSize || !block.textColor) continue
+
+      const textColor = block.manualTextColor || block.textColor
+      const fontFamily = block.fontFamily || defaultFont
+      const fontWeight = block.fontWeight || 'normal'
+      const fontStretch = block.fontStretch || 'normal'
+      const letterSpacing = block.letterSpacing || 0
+      const lineHeightMultiplier = block.lineHeight || 1.2
+
+      ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+
+      const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
+      if (hasOutline) {
+        ctx.strokeStyle = `rgb(${block.appearance.sourceOutlineColor.r}, ${block.appearance.sourceOutlineColor.g}, ${block.appearance.sourceOutlineColor.b})`
+        ctx.lineWidth = block.appearance.outlineWidthPx
+        ctx.lineJoin = 'round'
+        ctx.miterLimit = 2
+      }
+
+      ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
+
+      const boxWidth = block.xmax - block.xmin
+      const boxHeight = block.ymax - block.ymin
+      const maxWidth = boxWidth * 0.9
+      const centerX = (block.xmin + block.xmax) / 2
+      const centerY = (block.ymin + block.ymax) / 2
+
+      const measureTextWithSpacing = (text: string): number => {
+        if (letterSpacing === 0) return ctx.measureText(text).width
+        let totalWidth = 0
+        for (let i = 0; i < text.length; i++) {
+          totalWidth += ctx.measureText(text[i]).width
+          if (i < text.length - 1) totalWidth += letterSpacing
+        }
+        return totalWidth
+      }
+
+      const drawTextWithSpacing = (text: string, x: number, y: number, isStroke: boolean = false) => {
+        if (letterSpacing === 0) {
+          if (isStroke) ctx.strokeText(text, x, y, maxWidth)
+          else ctx.fillText(text, x, y, maxWidth)
+          return
+        }
+        const totalWidth = measureTextWithSpacing(text)
+        let currentX = x - totalWidth / 2
+        for (let i = 0; i < text.length; i++) {
+          const char = text[i]
+          const charWidth = ctx.measureText(char).width
+          const charCenterX = currentX + charWidth / 2
+          if (isStroke) ctx.strokeText(char, charCenterX, y)
+          else ctx.fillText(char, charCenterX, y)
+          currentX += charWidth + letterSpacing
+        }
+      }
+
+      const words = block.translatedText.split(' ')
+      const lines: string[] = []
+      let currentLine = ''
+      for (const word of words) {
+        const testLine = currentLine + (currentLine ? ' ' : '') + word
+        if (measureTextWithSpacing(testLine) > maxWidth && currentLine !== '') {
+          lines.push(currentLine)
+          currentLine = word
+        } else {
+          currentLine = testLine
+        }
+      }
+      if (currentLine) lines.push(currentLine)
+
+      const lineHeight = block.fontSize * lineHeightMultiplier
+      const totalHeight = lines.length * lineHeight
+      const startY = totalHeight > boxHeight * 0.9
+        ? block.ymin + lineHeight / 2
+        : centerY - ((lines.length - 1) * lineHeight) / 2
+
+      lines.forEach((line, i) => {
+        const y = startY + i * lineHeight
+        if (hasOutline) drawTextWithSpacing(line, centerX, y, true)
+        drawTextWithSpacing(line, centerX, y, false)
+      })
     }
   }
 

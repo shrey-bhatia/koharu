@@ -2,10 +2,14 @@ import { TextBlock } from '@/lib/state'
 import { classifyLayout, LayoutStrategy } from './layout-classification'
 
 /**
- * Improved Font Sizing Module
+ * Improved Font Sizing Module v2
  *
- * Uses layout-aware strategies, balanced line breaking, and mask geometry
- * to produce better text fitting than naive binary search.
+ * Key improvements over v1:
+ * - Character-level line breaking for CJK text (no spaces needed)
+ * - Wider search range (8px to box-proportional max, not capped at 72px)
+ * - Tighter binary search that maximizes text size without overflow
+ * - Reduced padding for better area utilization
+ * - Smart word+character hybrid breaking
  */
 
 export interface ImprovedFontMetrics {
@@ -48,6 +52,13 @@ function createMeasurementContext(): MeasurementContext | null {
 }
 
 /**
+ * Detect if text contains CJK characters that can break at any point
+ */
+function hasCJK(text: string): boolean {
+  return /[\u3000-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/.test(text)
+}
+
+/**
  * Calculate optimal font size using layout-aware strategy
  */
 export function calculateImprovedFontSize(
@@ -73,21 +84,17 @@ export function calculateImprovedFontSize(
   // Classify layout mode
   const strategy = classifyLayout(block)
 
-  // Adjust available width based on strategy
+  // Use tighter padding for better area utilization
   const effectiveWidth = boxWidth * strategy.columnWidthRatio
-  const effectiveHeight = boxHeight * 0.9 // 10% vertical padding
+  const effectiveHeight = boxHeight * 0.92 // Reduced from 0.9 → 8% vertical padding
 
-  // Estimate initial font size from mask area if available
-  const initialEstimate = estimateInitialFontSize(block, text, strategy)
-
-  // Run optimization loop
+  // Run optimization — wider search range, no cap at 72px
   const result = optimizeFontSize(
     text,
     effectiveWidth,
     effectiveHeight,
     fontFamily,
-    strategy,
-    initialEstimate
+    strategy
   )
 
   return {
@@ -98,174 +105,176 @@ export function calculateImprovedFontSize(
 }
 
 /**
- * Estimate initial font size from mask area and text length
- */
-function estimateInitialFontSize(
-  block: TextBlock,
-  text: string,
-  strategy: LayoutStrategy
-): number {
-  const boxWidth = block.xmax - block.xmin
-  const boxHeight = block.ymax - block.ymin
-  const boxArea = boxWidth * boxHeight
-
-  // If mask stats available, use actual text area
-  const maskArea = block.maskStats?.area || boxArea * 0.7  // Increased from 0.5 for better fallback
-
-  // Estimate glyphs per line based on layout mode
-  const avgGlyphsPerLine = strategy.mode === 'vertical-narrow' ? 5 : 10
-  const estimatedLines = Math.ceil(text.length / avgGlyphsPerLine)
-
-  // Target coverage ratio
-  const targetArea = boxArea * strategy.targetCoverageRatio
-
-  // Solve: fontSize^2 * text.length * density = targetArea
-  const glyphDensity = 0.85 // Increased from 0.7 for better CJK text density estimation
-  const fontSize = Math.sqrt(targetArea / (text.length * glyphDensity))
-
-  // Clamp to reasonable range
-  return Math.max(8, Math.min(fontSize, Math.min(boxHeight * 0.6, 48)))
-}
-
-/**
- * Optimize font size using penalty-based search
+ * Optimize font size using full-range binary search.
+ * 
+ * Strategy: find the largest font size where text fits within the box.
+ * No initial estimate needed — binary search over the full plausible range is fast (< 15 iterations).
  */
 function optimizeFontSize(
   text: string,
   maxWidth: number,
   maxHeight: number,
   fontFamily: string,
-  strategy: LayoutStrategy,
-  initialEstimate: number
+  strategy: LayoutStrategy
 ): Omit<ImprovedFontMetrics, 'alignment' | 'rotationDeg'> {
-  interface Evaluation {
-    fontSize: number
-    lines: string[]
-    width: number
-    height: number
-    penalty: number
-  }
-
-  const evaluationCache = new Map<number, Evaluation>()
   const letterSpacing = strategy.letterSpacingAdjustment
   const lineHeightMultiplier = strategy.lineHeightMultiplier
 
-  const searchRadius = initialEstimate * 0.5
-  const minSize = Math.max(8, Math.floor(initialEstimate - searchRadius))
-  const maxSize = Math.min(72, Math.ceil(initialEstimate + searchRadius))
-  const normalizedMin = Math.min(minSize, maxSize)
-  const normalizedMax = Math.max(minSize, maxSize)
+  // Dynamic max: for a box of height H, the max font size is ~H (single line fills the box).
+  // For width W, a single character could be up to W.
+  const dynamicMax = Math.min(maxHeight, maxWidth, 200)
+  const minSize = 6
+  const maxSize = Math.max(minSize + 1, Math.floor(dynamicMax))
 
-  const clampFontSize = (value: number) =>
-    Math.max(normalizedMin, Math.min(normalizedMax, Math.round(value)))
-
-  const evaluate = (fontSize: number): Evaluation => {
-    if (evaluationCache.has(fontSize)) {
-      return evaluationCache.get(fontSize) as Evaluation
-    }
-
-    const lines = balancedLineBreak(text, maxWidth, fontSize, fontFamily, letterSpacing)
-    const { width, height } = measureLines(
-      lines,
-      fontSize,
-      fontFamily,
-      letterSpacing,
-      lineHeightMultiplier
-    )
-
-    const penalty = calculatePenalty(
-      width,
-      height,
-      maxWidth,
-      maxHeight,
-      lines,
-      strategy.targetCoverageRatio
-    )
-
-    const evaluation: Evaluation = {
-      fontSize,
-      lines,
-      width,
-      height,
-      penalty,
-    }
-
-    evaluationCache.set(fontSize, evaluation)
-    return evaluation
-  }
-
-  let low = normalizedMin
-  let high = normalizedMax
-  let bestFit: Evaluation | null = null
+  // Binary search: find the largest fontSize that fits
+  let low = minSize
+  let high = maxSize
+  let bestFit: { fontSize: number; lines: string[]; width: number; height: number } | null = null
 
   while (low <= high) {
     const mid = Math.floor((low + high) / 2)
-    const evaluation = evaluate(mid)
+    const lines = smartLineBreak(text, maxWidth, mid, fontFamily, letterSpacing)
+    const { width, height } = measureLines(lines, mid, fontFamily, letterSpacing, lineHeightMultiplier)
 
-    if (evaluation.width <= maxWidth && evaluation.height <= maxHeight) {
-      bestFit = evaluation
-      low = mid + 1
+    if (width <= maxWidth && height <= maxHeight) {
+      bestFit = { fontSize: mid, lines, width, height }
+      low = mid + 1 // Try larger
     } else {
-      high = mid - 1
+      high = mid - 1 // Too big, try smaller
     }
   }
 
-  const fallbackSize = clampFontSize(initialEstimate || 12)
-  const pivotEvaluation = bestFit ?? evaluate(fallbackSize)
-
-  let bestEvaluation = pivotEvaluation
-  const neighborhoodStart = Math.max(minSize, pivotEvaluation.fontSize - 3)
-  const neighborhoodEnd = Math.min(maxSize, pivotEvaluation.fontSize + 3)
-
-  for (let fontSize = neighborhoodStart; fontSize <= neighborhoodEnd; fontSize++) {
-    const evaluation = evaluate(fontSize)
-    if (evaluation.penalty < bestEvaluation.penalty) {
-      bestEvaluation = evaluation
-    }
+  // Fallback: if nothing fits, use minimum size
+  if (!bestFit) {
+    const lines = smartLineBreak(text, maxWidth, minSize, fontFamily, letterSpacing)
+    const { width, height } = measureLines(lines, minSize, fontFamily, letterSpacing, lineHeightMultiplier)
+    bestFit = { fontSize: minSize, lines, width, height }
   }
 
   return {
-    fontSize: bestEvaluation.fontSize,
-    lines: bestEvaluation.lines,
-    actualWidth: bestEvaluation.width,
-    actualHeight: bestEvaluation.height,
+    fontSize: bestFit.fontSize,
+    lines: bestFit.lines,
+    actualWidth: bestFit.width,
+    actualHeight: bestFit.height,
     lineHeight: lineHeightMultiplier,
     letterSpacing,
   }
 }
 
 /**
- * Balanced line breaking using greedy best-fit with raggedness penalty
+ * Smart line breaking that handles both Western text (break on spaces)
+ * and CJK text (break at any character boundary).
+ * 
+ * For mixed text, words are broken on spaces first, then individual
+ * characters within a "word" (CJK segment) can be broken if the word
+ * is too wide for the line.
  */
-function balancedLineBreak(
+function smartLineBreak(
   text: string,
   maxWidth: number,
   fontSize: number,
   fontFamily: string,
   letterSpacing: number
 ): string[] {
-  const words = text.split(' ')
   const lines: string[] = []
+  
+  // Split into tokens: spaces create word boundaries, but each CJK character
+  // is also a valid break point. We split into segments that are either
+  // space-delimited words or individual CJK characters.
+  const tokens = tokenize(text)
   let currentLine = ''
 
-  for (const word of words) {
-    const testLine = currentLine + (currentLine ? ' ' : '') + word
-    const width = measureText(testLine, fontSize, fontFamily, letterSpacing).width
+  for (const token of tokens) {
+    const testLine = currentLine + token
+    const testWidth = measureText(testLine, fontSize, fontFamily, letterSpacing).width
 
-    if (width > maxWidth && currentLine !== '') {
-      // Push current line and start new one
+    if (testWidth > maxWidth && currentLine !== '') {
       lines.push(currentLine)
-      currentLine = word
+      // If the token itself is wider than maxWidth (very long word), 
+      // break it character by character
+      if (measureText(token, fontSize, fontFamily, letterSpacing).width > maxWidth) {
+        const charLines = breakLongToken(token, maxWidth, fontSize, fontFamily, letterSpacing)
+        // All but last go as full lines
+        for (let i = 0; i < charLines.length - 1; i++) {
+          lines.push(charLines[i])
+        }
+        currentLine = charLines[charLines.length - 1]
+      } else {
+        currentLine = token
+      }
+    } else if (testWidth > maxWidth && currentLine === '') {
+      // First token and already too wide — break it char by char
+      const charLines = breakLongToken(token, maxWidth, fontSize, fontFamily, letterSpacing)
+      for (let i = 0; i < charLines.length - 1; i++) {
+        lines.push(charLines[i])
+      }
+      currentLine = charLines[charLines.length - 1]
     } else {
       currentLine = testLine
     }
   }
 
-  if (currentLine) {
-    lines.push(currentLine)
-  }
-
+  if (currentLine) lines.push(currentLine)
   return lines.length > 0 ? lines : [text]
+}
+
+/**
+ * Tokenize text into breakable segments.
+ * CJK characters become individual tokens. Spaces attach to the preceding word.
+ * "Hello 世界 test" → ["Hello ", "世", "界", " test"]
+ */
+function tokenize(text: string): string[] {
+  const tokens: string[] = []
+  let current = ''
+  
+  // CJK Unicode ranges
+  const isCJK = (ch: string) => /[\u2E80-\u9FFF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF]/.test(ch)
+  
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (isCJK(ch)) {
+      if (current) {
+        tokens.push(current)
+        current = ''
+      }
+      tokens.push(ch)
+    } else if (ch === ' ') {
+      current += ch
+      tokens.push(current)
+      current = ''
+    } else {
+      current += ch
+    }
+  }
+  if (current) tokens.push(current)
+  
+  return tokens
+}
+
+/**
+ * Break a single token (word or CJK run) into lines that fit maxWidth.
+ */
+function breakLongToken(
+  token: string,
+  maxWidth: number,
+  fontSize: number,
+  fontFamily: string,
+  letterSpacing: number
+): string[] {
+  const lines: string[] = []
+  let current = ''
+  
+  for (const ch of token) {
+    const test = current + ch
+    if (measureText(test, fontSize, fontFamily, letterSpacing).width > maxWidth && current) {
+      lines.push(current)
+      current = ch
+    } else {
+      current = test
+    }
+  }
+  if (current) lines.push(current)
+  return lines
 }
 
 /**
@@ -329,48 +338,4 @@ function measureLines(
   const totalHeight = lines.length * fontSize * lineHeightMultiplier
 
   return { width: maxWidth, height: totalHeight }
-}
-
-/**
- * Calculate penalty for a given layout
- *
- * Penalizes:
- * - Overflow (hard constraint)
- * - Deviation from target coverage
- * - Raggedness (uneven line lengths)
- */
-function calculatePenalty(
-  width: number,
-  height: number,
-  maxWidth: number,
-  maxHeight: number,
-  lines: string[],
-  targetCoverage: number
-): number {
-  let penalty = 0
-
-  // Hard constraint: overflow (reduced penalty to allow larger text)
-  if (width > maxWidth) {
-    penalty += (width - maxWidth) * 50  // Reduced from 100
-  }
-
-  if (height > maxHeight) {
-    penalty += (height - maxHeight) * 50  // Reduced from 100
-  }
-
-  // Soft constraint: deviation from target coverage (increased weight)
-  const actualCoverage = (width * height) / (maxWidth * maxHeight)
-  const coverageDeviation = Math.abs(actualCoverage - targetCoverage)
-  penalty += coverageDeviation * 75  // Increased from 50 to prefer larger text
-
-  // Soft constraint: raggedness (variance in line lengths)
-  if (lines.length > 1) {
-    const lengths = lines.map((l) => l.length)
-    const avgLength = lengths.reduce((sum, len) => sum + len, 0) / lengths.length
-    const variance =
-      lengths.reduce((sum, len) => sum + Math.pow(len - avgLength, 2), 0) / lengths.length
-    penalty += Math.sqrt(variance) * 0.5
-  }
-
-  return penalty
 }

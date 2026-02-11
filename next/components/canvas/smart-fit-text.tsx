@@ -6,6 +6,8 @@ interface SmartFitTextProps {
   width: number
   height: number
   isVertical: boolean
+  /** If set, use this font size directly instead of auto-calculating */
+  fixedFontSize?: number
   minFontSize?: number
   maxFontSize?: number
   style?: React.CSSProperties
@@ -17,6 +19,7 @@ export const SmartFitText = ({
   width,
   height,
   isVertical,
+  fixedFontSize,
   minFontSize = 12,
   maxFontSize = 200,
   style,
@@ -24,22 +27,22 @@ export const SmartFitText = ({
 }: SmartFitTextProps) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const [fontSize, setFontSize] = useState<number>(() => {
+    // If a fixed size is provided (from processColors), use it directly
+    if (fixedFontSize) return fixedFontSize
     // Initial Heuristic Guess
-    // Area of Diamond ~ 0.5 * W * H
-    // Area of Text ~ CharCount * FontSize^2 * Constant
     const charCount = text.length || 1
     const availableArea = width * height * 0.5
-    // Constant: 0.8 (char aspect) * 1.2 (line height) ~= 1.0
-    // Conservative estimate to start slightly smaller
     const estimatedSize = Math.sqrt(availableArea / charCount)
     return Math.max(minFontSize, Math.min(maxFontSize, Math.floor(estimatedSize)))
   })
 
-  // We use a ref to track the "stable" font size to avoid effect loops
-  // But we need state to trigger the re-render
-  // const isMeasuringRef = useRef(false)
-
   useLayoutEffect(() => {
+    // If fixedFontSize is provided, use it directly — no binary search needed
+    if (fixedFontSize) {
+      if (fixedFontSize !== fontSize) setFontSize(fixedFontSize)
+      return
+    }
+
     const container = containerRef.current
     if (!container) return
 
@@ -116,7 +119,7 @@ export const SmartFitText = ({
       container.style.fontSize = `${bestFit}px`
     }
 
-  }, [text, width, height, isVertical, minFontSize, maxFontSize, fontSize])
+  }, [text, width, height, isVertical, fixedFontSize, minFontSize, maxFontSize, fontSize])
 
   const combinedStyle: React.CSSProperties = useMemo(() => ({
     ...style,
