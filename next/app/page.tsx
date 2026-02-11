@@ -178,20 +178,20 @@ function App() {
   const effectiveSidebarWidth = isSidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : expandedWidth
 
   return (
-    <main className='flex h-screen max-h-screen w-screen max-w-screen flex-col bg-gray-200 dark:bg-gray-900'>
+    <main className='flex h-screen max-h-screen w-screen max-w-screen flex-col bg-gray-100 dark:bg-gray-950'>
       <Topbar />
-      <div className='flex flex-1 overflow-hidden bg-gray-200 dark:bg-gray-900'>
+      <div className='flex flex-1 overflow-hidden'>
         <div className='flex h-full w-20 items-start p-3'>
           <Tools />
         </div>
 
         <div className='flex flex-1 overflow-hidden'>
-          <div className='flex flex-1 flex-col items-center justify-center'>
+          <div className='canvas-area-bg flex flex-1 flex-col items-center justify-center'>
             <Canvas />
           </div>
 
           <aside
-            className='relative h-full border-l border-gray-200 bg-white/95 shadow-inner dark:border-gray-700 dark:bg-gray-900/70'
+            className='glass relative h-full border-l border-gray-200/60 bg-white/80 dark:border-white/[.06] dark:bg-gray-900/75'
             style={{
               width: effectiveSidebarWidth,
               minWidth: isSidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_MIN_WIDTH,
@@ -202,8 +202,8 @@ function App() {
               role='separator'
               aria-orientation='vertical'
               title='Drag to resize sidebar'
-              className={`absolute left-0 top-0 z-20 h-full transition-colors duration-200 ${
-                isHandleDragging || isHandleHovered ? 'bg-blue-500/50' : 'bg-transparent'
+              className={`absolute left-0 top-0 z-20 h-full ${
+                isHandleDragging || isHandleHovered ? 'bg-indigo-500/40' : 'bg-transparent'
               }`}
               style={{
                 width: handleWidth,
@@ -233,12 +233,12 @@ function App() {
                   aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                   aria-expanded={!isSidebarCollapsed}
                   onClick={toggleSidebarCollapsed}
-                  className='flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 bg-white shadow-sm transition-colors hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-gray-600 dark:bg-gray-800 dark:hover:bg-gray-700'
+                  className='flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200/80 bg-white/60 shadow-sm hover:bg-gray-100/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10'
                 >
-                  <Menu className='h-5 w-5 text-gray-700 dark:text-gray-200' />
+                  <Menu className='h-4 w-4 text-gray-500 dark:text-gray-400' />
                 </button>
                 {!isSidebarCollapsed && (
-                  <span className='text-sm font-semibold text-gray-700 dark:text-gray-200'>Panels</span>
+                  <span className='text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500'>Panels</span>
                 )}
               </div>
 

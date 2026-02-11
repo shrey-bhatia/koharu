@@ -36,19 +36,31 @@ function Tools() {
   ]
 
   return (
-    <div className='flex w-20 flex-col items-center rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 shadow-sm'>
-      {tools.map((tool) => (
-        <div className='my-2' key={tool.id}>
-          <IconButton
-            size='3'
-            onClick={() => setSelectedTool(tool.id)}
-            title={`${tool.id}: ${tool.description}`}
-            variant={selectedTool === tool.id ? 'solid' : 'soft'}
-          >
-            <tool.icon size={22} />
-          </IconButton>
-        </div>
-      ))}
+    <div className='glass-subtle flex w-20 flex-col items-center rounded-2xl border border-gray-200/60 bg-white/70 px-3 py-3 shadow-sm dark:border-white/[.06] dark:bg-gray-900/50'>
+      {tools.map((tool) => {
+        const isActive = selectedTool === tool.id
+        return (
+          <div className='group relative my-1.5' key={tool.id}>
+            <div
+              className={`absolute -left-1.5 top-1/2 h-5 w-1 -translate-y-1/2 rounded-full transition-all duration-200 ${
+                isActive
+                  ? 'scale-100 bg-indigo-500 opacity-100'
+                  : 'scale-75 bg-transparent opacity-0 group-hover:scale-100 group-hover:bg-gray-300 group-hover:opacity-60 dark:group-hover:bg-gray-500'
+              }`}
+            />
+            <IconButton
+              size='3'
+              onClick={() => setSelectedTool(tool.id)}
+              title={`${tool.id}: ${tool.description}`}
+              variant={isActive ? 'solid' : 'ghost'}
+              color={isActive ? 'indigo' : undefined}
+              style={{ borderRadius: 12 }}
+            >
+              <tool.icon size={20} />
+            </IconButton>
+          </div>
+        )
+      })}
     </div>
   )
 }

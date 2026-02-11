@@ -1,25 +1,121 @@
 @import 'tailwindcss';
 @import '@radix-ui/themes/styles.css';
 
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: #f8f8f8;
-  border-radius: 8px;
-}
-
+/* ── Scrollbar ─────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: #c0c0c0;
-  border-radius: 8px;
+  background: rgba(0,0,0,.15);
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,.25); }
+
+.dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); }
+.dark ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.22); }
+
+/* ── Selection ─────────────────────────────────────────── */
+::selection {
+  background: rgba(99,102,241,.25);
+  color: inherit;
+}
+.dark ::selection {
+  background: rgba(129,140,248,.3);
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #a0a0a0;
+/* ── Focus rings ───────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid rgba(99,102,241,.5);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
+/* ── Global transitions ────────────────────────────────── */
+*,
+*::before,
+*::after {
+  transition-property: color, background-color, border-color, opacity, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(.4,0,.2,1);
+}
+
+/* Opt-out for elements where color transitions cause jank */
+canvas, video, img, svg path {
+  transition-property: none !important;
+}
+
+/* ── Body ──────────────────────────────────────────────── */
 body {
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Dot-grid canvas background ────────────────────────── */
+.canvas-area-bg {
+  background-color: #e5e7eb;
+  background-image:
+    radial-gradient(circle, rgba(0,0,0,.08) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+.dark .canvas-area-bg {
+  background-color: #111827;
+  background-image:
+    radial-gradient(circle, rgba(255,255,255,.06) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* ── Glass surfaces ────────────────────────────────────── */
+.glass {
+  backdrop-filter: blur(16px) saturate(1.8);
+  -webkit-backdrop-filter: blur(16px) saturate(1.8);
+}
+.glass-subtle {
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+}
+
+/* ── Gradient progress bar override ────────────────────── */
+.progress-gradient [data-state="complete"],
+.progress-gradient [data-state="loading"],
+.progress-gradient .rt-ProgressIndicator {
+  background: linear-gradient(90deg, #6366f1, #8b5cf6, #a78bfa) !important;
+  border-radius: 999px;
+}
+
+/* ── Panel card base ───────────────────────────────────── */
+.panel-card {
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,.06);
+  background: rgba(255,255,255,.85);
+  box-shadow:
+    0 1px 2px rgba(0,0,0,.04),
+    0 2px 8px rgba(0,0,0,.03);
+}
+.dark .panel-card {
+  border-color: rgba(255,255,255,.06);
+  background: rgba(30,30,40,.7);
+  box-shadow:
+    0 1px 2px rgba(0,0,0,.15),
+    0 2px 8px rgba(0,0,0,.12),
+    inset 0 1px 0 rgba(255,255,255,.03);
+}
+
+/* ── Pulse animation for splash ────────────────────────── */
+@keyframes koharu-pulse {
+  0%, 100% { opacity: .6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+@keyframes koharu-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(224,17,95,.15), 0 0 60px rgba(224,17,95,.05); }
+  50%      { box-shadow: 0 0 30px rgba(224,17,95,.3),  0 0 80px rgba(224,17,95,.1);  }
+}
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }

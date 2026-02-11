@@ -562,34 +562,40 @@ export default function RenderPanel() {
   const hasTranslations = textBlocks.some(b => b.translatedText)
 
   return (
-    <div className='flex w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md dark:border-gray-700 dark:bg-gray-800'>
+    <div className='panel-card flex w-full flex-col'>
       {/* Header */}
-      <div className='flex items-center gap-2 p-3'>
-        <h2 className='font-medium dark:text-white'>Render</h2>
+      <div className='flex items-center gap-2 px-4 py-3'>
+        <h2 className='text-sm font-semibold tracking-tight text-gray-800 dark:text-white'>Render</h2>
         <div className='flex-grow'></div>
         <Button
           onClick={processColors}
           loading={processing}
           variant='soft'
+          size='1'
+          color='indigo'
+          style={{ borderRadius: 8 }}
           disabled={!image || !hasTranslations}
         >
-          <Play className='h-4 w-4' />
+          <Play className='h-3.5 w-3.5' />
           Process
         </Button>
         <Button
           onClick={exportImage}
           variant='solid'
+          size='1'
+          color='indigo'
+          style={{ borderRadius: 8 }}
           disabled={!hasProcessedColors}
         >
-          <Download className='h-4 w-4' />
+          <Download className='h-3.5 w-3.5' />
           Export
         </Button>
       </div>
 
       {/* GPU Status */}
       {gpuStatus && (
-        <div className='border-t border-gray-200 p-3 dark:border-gray-700'>
-          <label className='text-xs font-semibold text-gray-600 dark:text-gray-400'>
+        <div className='border-t border-gray-100 px-4 py-3 dark:border-white/[.04]'>
+          <label className='text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500'>
             GPU Status
           </label>
           <div className='mt-1 flex items-center gap-2'>
@@ -613,8 +619,8 @@ export default function RenderPanel() {
       )}
 
       {/* Method Toggle */}
-      <div className='border-t border-gray-200 p-3 dark:border-gray-700'>
-        <label className='text-xs font-semibold text-gray-600 dark:text-gray-400'>
+      <div className='border-t border-gray-100 px-4 py-3 dark:border-white/[.04]'>
+        <label className='text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500'>
           Rendering Method
         </label>
         <Select.Root value={renderMethod} onValueChange={(value: 'rectangle' | 'lama' | 'newlama') => setRenderMethod(value)}>
@@ -643,13 +649,15 @@ export default function RenderPanel() {
       </div>
 
       {/* Body */}
-      <div className='flex flex-col gap-2 p-3'>
+      <div className='flex flex-col gap-3 px-4 py-3'>
         {/* Progress */}
         {processing && (
           <div className='space-y-2'>
-            <Progress value={progress * 100} />
-            <p className='text-sm text-gray-600 dark:text-gray-400'>
-              Processing colors and fonts... {Math.round(progress * 100)}%
+            <div className='progress-gradient'>
+              <Progress value={progress * 100} />
+            </div>
+            <p className='text-xs text-gray-500 dark:text-gray-400'>
+              Processing colors and fonts… {Math.round(progress * 100)}%
             </p>
           </div>
         )}
@@ -677,23 +685,23 @@ export default function RenderPanel() {
         )}
 
         {/* Status */}
-        <div className='flex flex-col gap-1 text-sm'>
+        <div className='flex flex-col gap-1.5 text-xs'>
           <div className='flex items-center justify-between'>
-            <span className='dark:text-gray-300'>Image:</span>
-            <span className={image ? 'text-green-600' : 'text-gray-400'}>
-              {image ? '✓ Loaded' : 'Not loaded'}
+            <span className='text-gray-500 dark:text-gray-400'>Image</span>
+            <span className={image ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}>
+              {image ? '✓ Loaded' : '—'}
             </span>
           </div>
           <div className='flex items-center justify-between'>
-            <span className='dark:text-gray-300'>Text blocks:</span>
-            <span className={textBlocks.length > 0 ? 'text-green-600' : 'text-gray-400'}>
-              {textBlocks.length > 0 ? `${textBlocks.length} detected` : 'None'}
+            <span className='text-gray-500 dark:text-gray-400'>Text blocks</span>
+            <span className={textBlocks.length > 0 ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}>
+              {textBlocks.length > 0 ? `${textBlocks.length} detected` : '—'}
             </span>
           </div>
           <div className='flex items-center justify-between'>
-            <span className='dark:text-gray-300'>Translations:</span>
-            <span className={hasTranslations ? 'text-green-600' : 'text-gray-400'}>
-              {hasTranslations ? `${textBlocks.filter(b => b.translatedText).length} ready` : 'None'}
+            <span className='text-gray-500 dark:text-gray-400'>Translations</span>
+            <span className={hasTranslations ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}>
+              {hasTranslations ? `${textBlocks.filter(b => b.translatedText).length} ready` : '—'}
             </span>
           </div>
         </div>
@@ -701,14 +709,14 @@ export default function RenderPanel() {
         {/* Block List for Customization */}
         {hasProcessedColors && (
           <div className='mt-2 space-y-2'>
-            <h3 className='text-sm font-semibold dark:text-white'>Customize Blocks</h3>
+            <h3 className='text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500'>Customize Blocks</h3>
             <div className='max-h-64 space-y-1 overflow-y-auto'>
               {textBlocks.map((block, i) => (
                 block.backgroundColor && (
                   <div key={i}>
                     <button
                       onClick={() => setSelectedBlock(selectedBlock === i ? null : i)}
-                      className='flex w-full items-center justify-between rounded p-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700'
+                      className='flex w-full items-center justify-between rounded-lg p-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-white/[.03]'
                     >
                       <div className='flex items-center gap-2'>
                         <Badge>{i + 1}</Badge>

@@ -11,7 +11,7 @@ export default function OCRPanel() {
     image,
     textBlocks,
     setTextBlocks,
-    setSelectedBlockIndex,
+    selectBlock,
   } = useEditorStore()
   const [loading, setLoading] = useState(false)
   const [editingBlock, setEditingBlock] = useState<number | null>(null)
@@ -228,17 +228,17 @@ export default function OCRPanel() {
     }
     setEditingBlock(index)
     setEditValue(textBlocks[index]?.text || '')
-    setSelectedBlockIndex(index)
-  }, [editingBlock, finishEditing, setSelectedBlockIndex, textBlocks])
+    selectBlock(index, textBlocks[index]?.id ?? null)
+  }, [editingBlock, finishEditing, selectBlock, textBlocks])
 
   return (
-    <div className='flex max-h-[600px] w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md dark:border-gray-700 dark:bg-gray-800'>
+    <div className='panel-card flex max-h-[600px] w-full flex-col'>
       {/* Header */}
-      <div className='flex flex-shrink-0 items-center-safe p-3'>
-        <h2 className='font-medium text-gray-900 dark:text-gray-100'>OCR</h2>
+      <div className='flex flex-shrink-0 items-center-safe px-4 py-3'>
+        <h2 className='text-sm font-semibold tracking-tight text-gray-800 dark:text-gray-100'>OCR</h2>
         <div className='flex-grow'></div>
-        <Button onClick={run} loading={loading} variant='soft'>
-          <Play className='h-4 w-4' />
+        <Button onClick={run} loading={loading} variant='soft' size='1' color='indigo' style={{ borderRadius: 8 }}>
+          <Play className='h-3.5 w-3.5' />
         </Button>
       </div>
 
@@ -274,12 +274,12 @@ export default function OCRPanel() {
         {textBlocks?.map((block, index) => (
           <div
             key={index}
-            className={`border-b border-gray-200 px-4 py-2 text-sm last:border-b-0 transition-colors dark:border-gray-700 ${
+            className={`border-b border-gray-100 px-4 py-2.5 text-sm last:border-b-0 dark:border-white/[.04] ${
               block.ocrStale
-                ? 'bg-orange-50 dark:bg-orange-900/40'
+                ? 'bg-amber-50/60 dark:bg-amber-500/[.06]'
                 : editingBlock === index
-                  ? 'bg-blue-50 dark:bg-blue-900/40'
-                  : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                  ? 'bg-indigo-50/50 dark:bg-indigo-500/[.06]'
+                  : 'hover:bg-gray-50/80 dark:hover:bg-white/[.02]'
             }`}
           >
             <div className='flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400'>

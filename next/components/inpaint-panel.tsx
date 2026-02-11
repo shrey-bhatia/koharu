@@ -27,7 +27,7 @@ interface InpaintedRegion {
 }
 
 export default function InpaintPanel() {
-  const { image, segmentationMask, segmentationMaskWidth, segmentationMaskHeight, textBlocks, setInpaintedImage, renderMethod, setPipelineStage, setCurrentStage, inpaintingConfig } = useEditorStore()
+  const { image, segmentationMaskInfo, textBlocks, setInpaintedImage, renderMethod, setPipelineStage, setCurrentStage, inpaintingConfig } = useEditorStore()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -36,7 +36,7 @@ export default function InpaintPanel() {
   const [cancelled, setCancelled] = useState(false)
 
   const runInpaint = async () => {
-    if (!image || !segmentationMask || textBlocks.length === 0) {
+    if (!image || !segmentationMaskInfo || textBlocks.length === 0) {
       setError('Missing requirements. Run Detection first.')
       return
     }
@@ -53,10 +53,10 @@ export default function InpaintPanel() {
   }
 
   const resolveMaskMetadata = () => {
-    const maskData = maskToUint8Array(segmentationMask!)
+    const maskData = maskToUint8Array(segmentationMaskInfo!.data)
 
-    let maskWidth = segmentationMaskWidth ?? Math.round(Math.sqrt(maskData.length))
-    let maskHeight = segmentationMaskHeight ?? Math.round(maskData.length / Math.max(maskWidth, 1))
+    let maskWidth = segmentationMaskInfo!.width
+    let maskHeight = segmentationMaskInfo!.height
 
     if (!maskWidth || !maskHeight || maskWidth * maskHeight !== maskData.length) {
       const perfectSquare = Math.round(Math.sqrt(maskData.length))
@@ -349,18 +349,21 @@ export default function InpaintPanel() {
   }
 
   return (
-    <div className='flex w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md dark:border-gray-700 dark:bg-gray-800'>
+    <div className='panel-card flex w-full flex-col'>
       {/* Header */}
-      <div className='flex items-center p-3'>
-        <h2 className='font-medium text-gray-900 dark:text-gray-100'>Inpainting</h2>
+      <div className='flex items-center px-4 py-3'>
+        <h2 className='text-sm font-semibold tracking-tight text-gray-800 dark:text-gray-100'>Inpainting</h2>
         <div className='flex-grow'></div>
         <Button
           onClick={runInpaint}
           loading={loading}
           variant='soft'
-          disabled={!image || !segmentationMask || renderMethod === 'rectangle'}
+          size='1'
+          color='indigo'
+          style={{ borderRadius: 8 }}
+          disabled={!image || !segmentationMaskInfo || renderMethod === 'rectangle'}
         >
-          <Play className='h-4 w-4' />
+          <Play className='h-3.5 w-3.5' />
         </Button>
       </div>
       
@@ -379,40 +382,41 @@ export default function InpaintPanel() {
       )}
 
       {/* Body */}
-      <div className='flex flex-col gap-2 p-3 text-gray-700 dark:text-gray-300'>
+      <div className='flex flex-col gap-3 px-4 py-3 text-gray-600 dark:text-gray-300'>
         {/* Info */}
-        <div className='text-sm text-gray-600 dark:text-gray-300'>
+        <div className='text-xs text-gray-500 dark:text-gray-400'>
           <p>Removes Japanese text from manga using AI inpainting</p>
         </div>
 
         {/* Status */}
-        <div className='flex flex-col gap-1 text-sm'>
-          <div className='flex items-center justify-between text-gray-700 dark:text-gray-300'>
-            <span>Image:</span>
-            <span className={image ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}>
-              {image ? '✓ Loaded' : 'Not loaded'}
+        <div className='flex flex-col gap-1.5 text-xs'>
+          <div className='flex items-center justify-between'>
+            <span className='text-gray-500 dark:text-gray-400'>Image</span>
+            <span className={image ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-gray-400 dark:text-gray-500'}>
+              {image ? '✓ Loaded' : '—'}
             </span>
           </div>
-          <div className='flex items-center justify-between text-gray-700 dark:text-gray-300'>
-            <span>Segmentation mask:</span>
-            <span className={segmentationMask ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}>
-              {segmentationMask ? `✓ Ready (${segmentationMask.length} bytes)` : 'Run detection'}
+          <div className='flex items-center justify-between'>
+            <span className='text-gray-500 dark:text-gray-400'>Segmentation mask</span>
+            <span className={segmentationMaskInfo ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-gray-400 dark:text-gray-500'}>
+              {segmentationMaskInfo ? `✓ Ready` : 'Run detection'}
             </span>
           </div>
-          <div className='flex items-center justify-between text-gray-700 dark:text-gray-300'>
-            <span>Text regions:</span>
-            <span className={textBlocks.length > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}>
+          <div className='flex items-center justify-between'>
+            <span className='text-gray-500 dark:text-gray-400'>Text regions</span>
+            <span className={textBlocks.length > 0 ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-gray-400 dark:text-gray-500'}>
               {textBlocks.length > 0 ? `${textBlocks.length} detected` : 'None'}
             </span>
           </div>
         </div>
 
         {/* Config Info */}
-        <div className='text-xs text-gray-600 dark:text-gray-400'>
-          <p>
-            Using <strong>{inpaintingConfig.padding}px</strong> padding,{' '}
-            <strong>{inpaintingConfig.maskErosion}px</strong> erosion
-          </p>
+        <div className='flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500'>
+          <span className='rounded bg-gray-100 px-1.5 py-0.5 font-mono dark:bg-white/[.06]'>{inpaintingConfig.padding}px</span>
+          <span>padding</span>
+          <span className='text-gray-300 dark:text-gray-600'>·</span>
+          <span className='rounded bg-gray-100 px-1.5 py-0.5 font-mono dark:bg-white/[.06]'>{inpaintingConfig.maskErosion}px</span>
+          <span>erosion</span>
         </div>
 
         {/* Error */}
@@ -440,12 +444,14 @@ export default function InpaintPanel() {
         {/* Progress for localized/newlama inpainting */}
         {loading && (renderMethod === 'lama' || renderMethod === 'newlama') && (
           <div className='space-y-2'>
-            <Progress value={progress * 100} />
-            <p className='text-sm text-gray-600 dark:text-gray-300'>
+            <div className='progress-gradient'>
+              <Progress value={progress * 100} />
+            </div>
+            <p className='text-xs text-gray-500 dark:text-gray-400'>
               Processing block {currentBlock} of {textBlocks.length}...
             </p>
-            <Button size='1' color='red' variant='soft' onClick={() => setCancelled(true)}>
-              <X className='h-4 w-4' />
+            <Button size='1' color='red' variant='soft' onClick={() => setCancelled(true)} style={{ borderRadius: 8 }}>
+              <X className='h-3.5 w-3.5' />
               Cancel
             </Button>
           </div>
@@ -460,7 +466,7 @@ export default function InpaintPanel() {
         )}
 
         {/* Instructions */}
-        {!segmentationMask && (
+        {!segmentationMaskInfo && (
           <Callout.Root size='1'>
             <Callout.Text>
               <strong>How it works:</strong>

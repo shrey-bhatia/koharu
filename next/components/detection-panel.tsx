@@ -46,8 +46,7 @@ export default function DetectionPanel() {
     setShowSegmentationMask,
     selectionSensitivity,
     setSelectionSensitivity,
-    setSelectedBlockIndex,
-    setSelectedBlockId,
+    selectBlock,
   } = useEditorStore()
   const [loading, setLoading] = useState(false)
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.5)
@@ -129,8 +128,7 @@ export default function DetectionPanel() {
 
   const blocksWithIds = ensureTextBlockIds(blocks)
   setTextBlocks(blocksWithIds)
-      setSelectedBlockIndex(null)
-      setSelectedBlockId(null)
+      selectBlock(null)
     } catch (error) {
       console.error('Error during detection:', error)
     } finally {
@@ -139,22 +137,22 @@ export default function DetectionPanel() {
   }
 
   return (
-    <div className='flex w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md dark:border-gray-700 dark:bg-gray-800'>
+    <div className='panel-card flex w-full flex-col'>
       {/* Header */}
-      <div className='flex items-center p-3'>
-        <h2 className='font-medium text-gray-900 dark:text-gray-100'>Detection</h2>
+      <div className='flex items-center px-4 py-3'>
+        <h2 className='text-sm font-semibold tracking-tight text-gray-800 dark:text-gray-100'>Detection</h2>
         <div className='flex-grow'></div>
-        <Button onClick={run} loading={loading} variant='soft'>
-          <Play className='h-4 w-4' />
+        <Button onClick={run} loading={loading} variant='soft' size='1' color='indigo' style={{ borderRadius: 8 }}>
+          <Play className='h-3.5 w-3.5' />
         </Button>
       </div>
       {/* Body */}
       <div className='flex flex-col justify-center'>
-        <div className='flex flex-col gap-2 border-b border-gray-200 px-4 py-2 text-sm text-gray-700 dark:border-gray-700 dark:text-gray-300'>
-          <div className='flex flex-col gap-1'>
+        <div className='flex flex-col gap-3 border-t border-gray-100 px-4 py-3 text-sm dark:border-white/[.04]'>
+          <div className='flex flex-col gap-1.5'>
             <div className='flex items-center justify-between'>
-              <span className='font-medium text-gray-800 dark:text-gray-100'>Confidence threshold</span>
-              <span className='font-mono text-gray-900 dark:text-gray-100'>{confidenceThreshold}</span>
+              <span className='text-xs font-medium text-gray-500 dark:text-gray-400'>Confidence threshold</span>
+              <span className='rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-700 dark:bg-white/[.06] dark:text-gray-200'>{confidenceThreshold}</span>
             </div>
             <Slider
               size='1'
@@ -165,10 +163,10 @@ export default function DetectionPanel() {
               onValueChange={(value) => setConfidenceThreshold(value[0])}
             />
           </div>
-          <div className='flex flex-col gap-1'>
+          <div className='flex flex-col gap-1.5'>
             <div className='flex items-center justify-between'>
-              <span className='font-medium text-gray-800 dark:text-gray-100'>NMS threshold</span>
-              <span className='font-mono text-gray-900 dark:text-gray-100'>{nmsThreshold}</span>
+              <span className='text-xs font-medium text-gray-500 dark:text-gray-400'>NMS threshold</span>
+              <span className='rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-700 dark:bg-white/[.06] dark:text-gray-200'>{nmsThreshold}</span>
             </div>
             <Slider
               size='1'
@@ -179,10 +177,10 @@ export default function DetectionPanel() {
               onValueChange={(value) => setNmsThreshold(value[0])}
             />
           </div>
-          <div className='flex flex-col gap-1'>
+          <div className='flex flex-col gap-1.5'>
             <div className='flex items-center justify-between'>
-              <span className='font-medium text-gray-800 dark:text-gray-100'>Selection sensitivity</span>
-              <span className='font-mono text-gray-900 dark:text-gray-100'>{selectionSensitivity.toFixed(0)} px</span>
+              <span className='text-xs font-medium text-gray-500 dark:text-gray-400'>Selection sensitivity</span>
+              <span className='rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-700 dark:bg-white/[.06] dark:text-gray-200'>{selectionSensitivity.toFixed(0)} px</span>
             </div>
             <Slider
               size='1'
@@ -194,7 +192,7 @@ export default function DetectionPanel() {
             />
           </div>
           <div className='flex items-center justify-between'>
-            <span className='font-medium text-gray-800 dark:text-gray-100'>Show detection mask</span>
+            <span className='text-xs font-medium text-gray-500 dark:text-gray-400'>Show detection mask</span>
             <Button
               size='1'
               variant={showSegmentationMask ? 'solid' : 'soft'}
@@ -205,8 +203,8 @@ export default function DetectionPanel() {
               {showSegmentationMask ? 'On' : 'Off'}
             </Button>
           </div>
-          <Text className='text-gray-700 dark:text-gray-300'>
-            <strong>{textBlocks.length}</strong> text blocks detected
+          <Text className='text-xs text-gray-500 dark:text-gray-400'>
+            <strong className='text-gray-700 dark:text-gray-200'>{textBlocks.length}</strong> text blocks detected
           </Text>
         </div>
       </div>

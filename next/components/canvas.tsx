@@ -11,7 +11,7 @@ import { useZoomPerformance } from '@/utils/zoom-performance'
 import { BackgroundLayer } from './canvas/background-layer'
 import { InpaintLayer } from './canvas/inpaint-layer'
 import { RenderLayer } from './canvas/render-layer'
-import { HtmlRenderLayer } from './canvas/html-render-layer'
+import { HtmlRenderLayer, type HtmlRenderLayerHandle } from './canvas/html-render-layer'
 import { DetectionLayer } from './canvas/detection-layer'
 
 const generateBlockId = (): string => {
@@ -39,15 +39,15 @@ function Canvas() {
     textBlocks,
     setTextBlocks,
     selectedBlockIndex,
-    setSelectedBlockIndex,
     selectedBlockId,
-    setSelectedBlockId,
+    selectBlock,
     zoomOptimizationsEnabled,
     zoomMetricsEnabled,
     setAddTextAreaHandler,
   } = useEditorStore()
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
+  const htmlLayerRef = useRef<HtmlRenderLayerHandle>(null)
 
   const [isTouchDevice, setIsTouchDevice] = useState(false)
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
@@ -174,9 +174,8 @@ function Canvas() {
     }
 
     setTextBlocks([...textBlocks, newBlock])
-    setSelectedBlockIndex(textBlocks.length)
-    setSelectedBlockId(newId)
-  }, [image, containerSize, textBlocks, setTextBlocks, setSelectedBlockIndex, setSelectedBlockId])
+    selectBlock(textBlocks.length, newId)
+  }, [image, containerSize, textBlocks, setTextBlocks, selectBlock])
 
   // Register addTextArea handler in store
   useEffect(() => {
@@ -301,6 +300,9 @@ function Canvas() {
     }
 
     // Apply scale and position
+    // Always imperatively sync the HTML overlay immediately for zero-lag tracking
+    htmlLayerRef.current?.syncTransform(newPos.x, newPos.y, quantizedScale)
+
     if (zoomOptimizationsEnabled) {
       pendingScaleRef.current = quantizedScale
       pendingPosRef.current = newPos
@@ -409,10 +411,9 @@ function Canvas() {
   useEffect(() => {
     if (!isDetectionMode) {
       handleInteractionLock(false)
-      setSelectedBlockId(null)
-      setSelectedBlockIndex(null)
+      selectBlock(null)
     }
-  }, [isDetectionMode, handleInteractionLock, setSelectedBlockId, setSelectedBlockIndex])
+  }, [isDetectionMode, handleInteractionLock, selectBlock])
 
   return (
     <>
@@ -432,15 +433,13 @@ function Canvas() {
               dragBoundFunc={stageDragBound}
               onClick={(event) => {
                 if (event.target === event.currentTarget) {
-                  setSelectedBlockIndex(null)
-                  setSelectedBlockId(null)
+                  selectBlock(null)
                   handleInteractionLock(false)
                 }
               }}
               onTap={(event) => {
                 if (event.target === event.currentTarget) {
-                  setSelectedBlockIndex(null)
-                  setSelectedBlockId(null)
+                  selectBlock(null)
                   handleInteractionLock(false)
                 }
               }}
@@ -454,15 +453,14 @@ function Canvas() {
                   event.target.stopDrag()
                   return
                 }
-
-                if (process.env.NODE_ENV !== 'production') {
-                  const pointer = stageRef.current?.getPointerPosition()
-                  console.info('stage.drag.start', {
-                    stageLocked: stageLockRef.current,
-                    draggable: allowStageDrag && !stageLockRef.current,
-                    pointer,
-                  })
-                }
+              }}
+              onDragMove={(e) => {
+                const isStageSelf = e.target === e.currentTarget
+                if (!isStageSelf) return
+                // Imperatively sync the HTML overlay every frame during drag — zero lag
+                const pos = { x: e.target.x(), y: e.target.y() }
+                stagePosRef.current = pos
+                htmlLayerRef.current?.syncTransform(pos.x, pos.y, scale)
               }}
               onDragEnd={(e) => {
                 const isStageSelf = e.target === e.currentTarget
@@ -470,15 +468,10 @@ function Canvas() {
                   return
                 }
 
-                if (process.env.NODE_ENV !== 'production') {
-                  console.info('stage.drag.end', {
-                    position: { x: e.target.x(), y: e.target.y() },
-                  })
-                }
-
                 const finalPos = clampStagePosition({ x: e.target.x(), y: e.target.y() })
                 stagePosRef.current = finalPos
                 setStagePos(finalPos)
+                htmlLayerRef.current?.syncTransform(finalPos.x, finalPos.y, scale)
                 if (stageRef.current && (finalPos.x !== e.target.x() || finalPos.y !== e.target.y())) {
                   stageRef.current.position(finalPos)
                 }
@@ -496,7 +489,8 @@ function Canvas() {
             </Stage>
             
             {/* HTML Overlay Layer - sits on top of canvas but below UI controls */}
-            <HtmlRenderLayer 
+            <HtmlRenderLayer
+              ref={htmlLayerRef}
               stageScale={scale}
               stagePos={stagePos}
             />

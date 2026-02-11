@@ -1,34 +1,57 @@
-import React, { useMemo } from 'react'
+import React, { useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react'
 import { useEditorStore } from '@/lib/state'
 import { SmartFitText } from './smart-fit-text'
 import { detectWritingMode } from '@/utils/writing-mode'
+
+export interface HtmlRenderLayerHandle {
+  /** Imperatively sync the overlay transform — call from onDragMove / wheel for 0-lag tracking */
+  syncTransform: (x: number, y: number, scale: number) => void
+}
 
 interface HtmlRenderLayerProps {
   stageScale: number
   stagePos: { x: number; y: number }
 }
 
-export const HtmlRenderLayer = ({ stageScale, stagePos }: HtmlRenderLayerProps) => {
+export const HtmlRenderLayer = forwardRef<HtmlRenderLayerHandle, HtmlRenderLayerProps>(
+  ({ stageScale, stagePos }, ref) => {
   const { tool, currentStage, textBlocks } = useEditorStore()
   const showLayer = tool === 'render' && currentStage === 'final'
+  const containerRef = useRef<HTMLDivElement>(null)
 
-  // Memoize the container style to prevent thrashing
-  const containerStyle = useMemo(() => ({
-    transform: `translate(${stagePos.x}px, ${stagePos.y}px) scale(${stageScale})`,
-    transformOrigin: 'top left',
-    width: '100%',
-    height: '100%',
-    position: 'absolute' as const,
-    top: 0,
-    left: 0,
-    pointerEvents: 'none' as const, // Let clicks pass through to canvas
-    willChange: 'transform'
-  }), [stageScale, stagePos])
+  // Expose imperative sync method so the parent canvas can push transform updates
+  // directly to the DOM during drag/zoom — bypasses React render cycle entirely.
+  const syncTransform = useCallback((x: number, y: number, scale: number) => {
+    if (containerRef.current) {
+      containerRef.current.style.transform = `translate(${x}px, ${y}px) scale(${scale})`
+    }
+  }, [])
+
+  useImperativeHandle(ref, () => ({ syncTransform }), [syncTransform])
+
+  // Keep DOM in sync when React state updates (non-drag path: zoom buttons, fit, etc.)
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.style.transform = `translate(${stagePos.x}px, ${stagePos.y}px) scale(${stageScale})`
+    }
+  }, [stagePos.x, stagePos.y, stageScale])
 
   if (!showLayer) return null
 
   return (
-    <div style={containerStyle}>
+    <div
+      ref={containerRef}
+      style={{
+        transformOrigin: 'top left',
+        width: '100%',
+        height: '100%',
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        pointerEvents: 'none',
+        willChange: 'transform',
+      }}
+    >
       {textBlocks?.map((block, index) => {
         if (!block.translatedText) return null
 
@@ -117,4 +140,6 @@ export const HtmlRenderLayer = ({ stageScale, stagePos }: HtmlRenderLayerProps) 
       })}
     </div>
   )
-}
+})
+
+HtmlRenderLayer.displayName = 'HtmlRenderLayer'

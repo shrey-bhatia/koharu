@@ -9,9 +9,8 @@ export default function DetectionControls() {
     textBlocks,
     setTextBlocks,
     selectedBlockIndex,
-    setSelectedBlockIndex,
     addTextAreaHandler,
-    setSelectedBlockId,
+    selectBlock,
   } = useEditorStore()
 
   const handleAddTextArea = () => {
@@ -26,8 +25,7 @@ export default function DetectionControls() {
 
     const updated = textBlocks.filter((_, i) => i !== selectedBlockIndex)
     setTextBlocks(updated)
-    setSelectedBlockIndex(null)
-    setSelectedBlockId(null)
+    selectBlock(null)
   }
 
   return (

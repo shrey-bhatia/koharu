@@ -10,12 +10,12 @@ export default function InpaintSettings() {
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   return (
-    <div className='space-y-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800'>
+    <div className='panel-card space-y-4 p-4'>
       {/* Header */}
       <div className='flex items-center justify-between'>
         <div className='flex items-center gap-2'>
-          <Settings2 className='h-5 w-5 dark:text-white' />
-          <h3 className='font-semibold dark:text-white'>Inpainting Quality</h3>
+          <Settings2 className='h-4 w-4 text-gray-400 dark:text-gray-500' />
+          <h3 className='text-sm font-semibold tracking-tight text-gray-800 dark:text-white'>Inpainting Quality</h3>
         </div>
         {inpaintingPreset === 'custom' && (
           <Badge color='purple' size='1'>Custom</Badge>
@@ -24,15 +24,17 @@ export default function InpaintSettings() {
 
       {/* Preset Selector */}
       <div className='space-y-2'>
-        <label className='text-sm font-semibold dark:text-white'>Preset</label>
-        <div className='grid grid-cols-3 gap-2'>
+        <label className='text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500'>Preset</label>
+        <div className='grid grid-cols-3 gap-1.5'>
           {(['fast', 'balanced', 'quality'] as const).map((preset) => (
             <Button
               key={preset}
-              variant={inpaintingPreset === preset ? 'solid' : 'soft'}
+              variant={inpaintingPreset === preset ? 'solid' : 'ghost'}
+              color={inpaintingPreset === preset ? 'indigo' : undefined}
               onClick={() => setInpaintingPreset(preset)}
               className='capitalize'
-              size='2'
+              size='1'
+              style={{ borderRadius: 8 }}
             >
               {preset}
             </Button>
@@ -73,14 +75,15 @@ export default function InpaintSettings() {
       {/* Advanced Toggle */}
       <button
         onClick={() => setShowAdvanced(!showAdvanced)}
-        className='text-sm text-blue-600 hover:underline dark:text-blue-400'
+        className='flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
       >
-        {showAdvanced ? '▼' : '▶'} Advanced Settings
+        <span className='inline-block transition-transform duration-200' style={{ transform: showAdvanced ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+        Advanced Settings
       </button>
 
       {/* Advanced Controls */}
       {showAdvanced && (
-        <div className='space-y-4 border-t pt-4 dark:border-gray-700'>
+        <div className='space-y-4 border-t border-gray-100 pt-4 dark:border-white/[.04]'>
           {/* Context Padding */}
           <div className='space-y-2'>
             <label className='flex items-center justify-between text-xs font-medium text-gray-600 dark:text-gray-400'>

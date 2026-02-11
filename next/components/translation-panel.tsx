@@ -161,13 +161,13 @@ function TranslationPanel() {
   const canTranslate = !!currentApiKey
 
   return (
-    <div className='flex max-h-[800px] w-full flex-col rounded-lg border border-gray-200 bg-white shadow-md dark:border-gray-700 dark:bg-gray-800'>
+    <div className='panel-card flex max-h-[800px] w-full flex-col'>
       {/* Header */}
-      <div className='flex items-center p-3'>
-        <h2 className='font-medium dark:text-white'>Translation</h2>
+      <div className='flex items-center px-4 py-3'>
+        <h2 className='text-sm font-semibold tracking-tight text-gray-800 dark:text-white'>Translation</h2>
         <div className='flex-grow'></div>
-        <Button onClick={runTranslation} loading={loading} variant='soft' disabled={!canTranslate}>
-          <Play className='h-4 w-4' />
+        <Button onClick={runTranslation} loading={loading} variant='soft' size='1' color='indigo' style={{ borderRadius: 8 }} disabled={!canTranslate}>
+          <Play className='h-3.5 w-3.5' />
         </Button>
       </div>
 
@@ -204,7 +204,7 @@ function TranslationPanel() {
         {textBlocks.map((block, index) => (
           <div
             key={index}
-            className='border-b border-gray-200 px-4 py-2 text-sm last:border-b-0 dark:border-gray-700'
+            className='border-b border-gray-100 px-4 py-3 text-sm last:border-b-0 dark:border-white/[.04]'
           >
             <div className='mb-1 flex items-center gap-2'>
               <Badge>{index + 1}</Badge>
@@ -215,12 +215,12 @@ function TranslationPanel() {
             {block.text && (
               <div className='space-y-1'>
                 <div>
-                  <Text className='text-xs font-semibold text-gray-600 dark:text-gray-400'>Original:</Text>
-                  <Text className='text-sm dark:text-gray-200'>{block.text}</Text>
+                  <Text className='text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500'>Original</Text>
+                  <Text className='text-sm text-gray-700 dark:text-gray-200'>{block.text}</Text>
                 </div>
                 {block.translatedText && (
                   <div>
-                    <Text className='text-xs font-semibold text-gray-600 dark:text-gray-400'>Translation:</Text>
+                    <Text className='text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500'>Translation</Text>
                     {editingBlock === index ? (
                       <TextArea
                         value={editValue}
@@ -233,7 +233,7 @@ function TranslationPanel() {
                     ) : (
                       <div
                         onClick={() => startEditing(index)}
-                        className='cursor-pointer rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-700'
+                        className='cursor-pointer rounded-lg p-1.5 hover:bg-gray-50 dark:hover:bg-white/[.03]'
                         title='Click to edit'
                       >
                         <Text className='text-sm font-medium dark:text-gray-100'>{block.translatedText}</Text>

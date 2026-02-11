@@ -134,6 +134,13 @@ export type TextBlock = {
   appearanceAnalyzed?: boolean
 }
 
+// Named tool type for type-safe tool selection
+export type Tool = 'detection' | 'translation' | 'inpaint' | 'render' | 'segmentation'
+
+// Available OCR models (static, no store needed)
+export const AVAILABLE_OCR_MODELS = ['manga-ocr', 'paddle-ocr'] as const
+export type OcrModel = (typeof AVAILABLE_OCR_MODELS)[number]
+
 // Load Google API key from localStorage (browser/Tauri context)
 const loadGoogleApiKey = (): string | null => {
   if (typeof window === 'undefined') return null
@@ -278,9 +285,7 @@ export const useEditorStore = create(
       ollamaModel: loadOllamaModel(),
       ollamaSystemPrompt: loadOllamaSystemPrompt(),
     translationProvider: loadTranslationProvider(),
-    segmentationMask: null,
-    segmentationMaskWidth: null,
-    segmentationMaskHeight: null,
+    segmentationMaskInfo: null,
     segmentationMaskBitmap: null,
     showSegmentationMask: false,
       inpaintedImage: null,
@@ -310,7 +315,7 @@ export const useEditorStore = create(
       addTextAreaHandler: null,
     } as {
       image: Image | null
-      tool: 'detection' | 'translation' | 'inpaint' | 'render' | 'segmentation'
+      tool: Tool
       scale: number
       textBlocks: TextBlock[]
       translationApiKey: string | null
@@ -318,9 +323,7 @@ export const useEditorStore = create(
       ollamaModel: string
       ollamaSystemPrompt: string
     translationProvider: 'google' | 'deepl-free' | 'deepl-pro' | 'ollama'
-    segmentationMask: Uint8Array | null
-    segmentationMaskWidth: number | null
-    segmentationMaskHeight: number | null
+    segmentationMaskInfo: SegmentationMaskInfo | null
     segmentationMaskBitmap: ImageBitmap | null
     showSegmentationMask: boolean
       inpaintedImage: Image | null
@@ -381,9 +384,7 @@ export const useEditorStore = create(
             final: null,
           },
           textBlocks: [],
-          segmentationMask: null,
-          segmentationMaskWidth: null,
-          segmentationMaskHeight: null,
+          segmentationMaskInfo: null,
           segmentationMaskBitmap: null,
           inpaintedImage: null,
           selectedBlockIndex: null,
@@ -391,7 +392,7 @@ export const useEditorStore = create(
           showSegmentationMask: false,
         }
       }),
-      setTool: (tool: 'detection' | 'translation' | 'inpaint' | 'render' | 'segmentation') => set({ tool }),
+      setTool: (tool: Tool) => set({ tool }),
       setScale: (scale: number) => set({ scale }),
       setTextBlocks: (textBlocks: TextBlock[]) => set({ textBlocks }),
       updateTextBlock: (
@@ -453,11 +454,7 @@ export const useEditorStore = create(
         set({ ollamaSystemPrompt: prompt })
       },
       setSegmentationMask: (mask: SegmentationMaskInfo | null) =>
-        set({
-          segmentationMask: mask ? mask.data : null,
-          segmentationMaskWidth: mask ? mask.width : null,
-          segmentationMaskHeight: mask ? mask.height : null,
-        }),
+        set({ segmentationMaskInfo: mask }),
       setSegmentationMaskBitmap: (bitmap: ImageBitmap | null) =>
         set((state) => {
           if (state.segmentationMaskBitmap && state.segmentationMaskBitmap !== bitmap) {
@@ -492,6 +489,10 @@ export const useEditorStore = create(
       },
   setSelectedBlockIndex: (index: number | null) => set({ selectedBlockIndex: index }),
   setSelectedBlockId: (id: string | null) => set({ selectedBlockId: id }),
+      selectBlock: (index: number | null, id?: string | null) => set({
+        selectedBlockIndex: index,
+        selectedBlockId: id ?? null,
+      }),
       setGpuPreference: (pref: 'cuda' | 'directml' | 'cpu') => {
         if (typeof window !== 'undefined') {
           localStorage.setItem('gpu_preference', pref)

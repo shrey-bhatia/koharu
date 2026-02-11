@@ -78,22 +78,22 @@ function Topbar() {
   }
 
   return (
-    <div className='flex w-full items-center border-b border-gray-200 bg-white p-2 shadow-sm dark:border-gray-700 dark:bg-gray-900'>
-      <div className='mx-1 flex items-center'>
-        <Button onClick={handleOpenImage} variant='soft'>
-          <ImageIcon size={20} />
+    <div className='glass flex w-full items-center border-b border-gray-200/60 bg-white/70 px-3 py-1.5 dark:border-white/[.06] dark:bg-gray-900/60'>
+      <div className='flex items-center gap-1'>
+        <Button onClick={handleOpenImage} variant='ghost' size='1'>
+          <ImageIcon size={18} />
         </Button>
-        <Button onClick={handlePasteImage} variant='soft'>
-          <Clipboard size={20} />
+        <Button onClick={handlePasteImage} variant='ghost' size='1'>
+          <Clipboard size={18} />
         </Button>
       </div>
 
-      <div className='flex-grow flex items-center justify-center gap-2'>
+      <div className='flex-grow flex items-center justify-center gap-1.5'>
         {tool === 'detection' && <DetectionControls />}
 
         {/* Pipeline Stage Viewer */}
         {(tool === 'render' || tool === 'inpaint') && (
-          <div className='flex items-center gap-1'>
+          <div className='flex items-center gap-0.5 rounded-full bg-gray-100/80 p-0.5 dark:bg-white/[.06]'>
             {(['original', 'textless', 'withRectangles', 'final'] as const)
               .filter(stage => {
                 // Hide +Backgrounds stage for LaMa/NewLaMa methods since rectangles don't apply
@@ -110,10 +110,11 @@ function Topbar() {
                   <Button
                     key={stage}
                     size='1'
-                    variant={isActive ? 'solid' : 'soft'}
-                    color={isActive ? 'blue' : 'gray'}
+                    variant={isActive ? 'solid' : 'ghost'}
+                    color={isActive ? 'indigo' : 'gray'}
                     disabled={!hasStage}
                     onClick={() => setCurrentStage(stage)}
+                    style={{ borderRadius: '9999px' }}
                   >
                     {stageLabels[stage]}
                     {!hasStage && <Badge size='1' color='gray' ml='1'>-</Badge>}
@@ -124,18 +125,18 @@ function Topbar() {
         )}
       </div>
 
-      <div className='mx-1 flex items-center gap-1'>
+      <div className='flex items-center gap-1'>
         {textBlocks.some(b => b.translatedText) && (
           <>
-            <div className='flex items-center gap-2'>
-              <span className='text-sm'>Font Size Step:</span>
+            <div className='flex items-center gap-1.5 rounded-lg bg-gray-100/80 px-2 py-1 dark:bg-white/[.06]'>
+              <span className='text-xs text-gray-500 dark:text-gray-400'>Step</span>
               <Slider
                 value={[fontSizeStep]}
                 onValueChange={(value) => setFontSizeStep(value[0])}
                 min={1}
                 max={10}
                 step={1}
-                className='w-16'
+                className='w-14'
               />
               <input
                 type='number'
@@ -143,23 +144,24 @@ function Topbar() {
                 onChange={(e) => setFontSizeStep(parseInt(e.target.value) || 1)}
                 min={1}
                 max={10}
-                className='w-12 px-1 py-0.5 text-sm border rounded'
+                className='w-10 rounded-md border border-gray-200 bg-white/60 px-1 py-0.5 text-center text-xs tabular-nums dark:border-white/10 dark:bg-white/5 dark:text-gray-200'
               />
             </div>
-            <Button onClick={decreaseFontSize} size='1' variant='soft'>
-              <ChevronDown size={16} /> A
+            <Button onClick={decreaseFontSize} size='1' variant='ghost'>
+              <ChevronDown size={14} /> A
             </Button>
-            <Button onClick={increaseFontSize} size='1' variant='soft'>
-              <ChevronUp size={16} /> A
+            <Button onClick={increaseFontSize} size='1' variant='ghost'>
+              <ChevronUp size={14} /> A
             </Button>
           </>
         )}
         <IconButton
           variant='ghost'
+          size='1'
           onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
           title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
         >
-          {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
+          {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
         </IconButton>
         <SettingsDialog />
       </div>

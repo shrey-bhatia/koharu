@@ -41,19 +41,20 @@ function ScaleControl({ onZoom, onReset }: ScaleControlProps) {
 
   return (
     <div className='absolute bottom-5 left-5 z-10'>
-      <div className='flex items-center gap-1 rounded-xl border border-gray-200 bg-gray-50 p-1 shadow-sm'>
+      <div className='glass flex items-center gap-0.5 rounded-full border border-gray-200/60 bg-white/70 p-1 shadow-lg shadow-black/[.04] dark:border-white/[.08] dark:bg-gray-900/60'>
         <Button
           onClick={handleZoomOut}
           disabled={scale <= 0.1}
-          variant='soft'
-          size='2'
+          variant='ghost'
+          size='1'
           title='Zoom out (Ctrl/Cmd + -)'
+          style={{ borderRadius: '9999px' }}
         >
-          <Minus size={18} className='text-gray-700' />
+          <Minus size={16} className='text-gray-600 dark:text-gray-300' />
         </Button>
         <button
           onClick={handleResetClick}
-          className='mx-1 min-w-[4rem] rounded px-2 py-1 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors'
+          className='min-w-[3.5rem] rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums text-gray-600 hover:bg-gray-200/60 dark:text-gray-300 dark:hover:bg-white/10'
           title='Fit to viewport (Ctrl/Cmd + 0)'
         >
           {(scale * 100).toFixed(0)}%
@@ -61,20 +62,22 @@ function ScaleControl({ onZoom, onReset }: ScaleControlProps) {
         <Button
           onClick={handleZoomIn}
           disabled={scale >= 2.0}
-          variant='soft'
-          size='2'
+          variant='ghost'
+          size='1'
           title='Zoom in (Ctrl/Cmd + +)'
+          style={{ borderRadius: '9999px' }}
         >
-          <Plus size={18} className='text-gray-700' />
+          <Plus size={16} className='text-gray-600 dark:text-gray-300' />
         </Button>
-        <div className='mx-1 h-6 w-px bg-gray-300' />
+        <div className='mx-0.5 h-4 w-px bg-gray-300/60 dark:bg-white/10' />
         <Button
           onClick={handleResetClick}
-          variant='soft'
-          size='2'
+          variant='ghost'
+          size='1'
           title='Fit to viewport (Ctrl/Cmd + 0)'
+          style={{ borderRadius: '9999px' }}
         >
-          <Maximize2 size={18} className='text-gray-700' />
+          <Maximize2 size={16} className='text-gray-600 dark:text-gray-300' />
         </Button>
       </div>
     </div>

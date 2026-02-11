@@ -38,8 +38,7 @@ export const DetectionBlock = React.memo(({
 }: DetectionBlockProps) => {
   const {
     updateTextBlock,
-    setSelectedBlockIndex,
-    setSelectedBlockId,
+    selectBlock,
     selectedBlockId,
     selectedBlockIndex
   } = useEditorStore()
@@ -73,11 +72,8 @@ export const DetectionBlock = React.memo(({
       const alreadySelectedById = selectedBlockId === blockIdOrNull
       const alreadySelectedByIndex = selectedBlockIndex === index
 
-      if (!alreadySelectedByIndex) {
-        setSelectedBlockIndex(index)
-      }
-      if (!alreadySelectedById) {
-        setSelectedBlockId(blockIdOrNull)
+      if (!alreadySelectedByIndex || !alreadySelectedById) {
+        selectBlock(index, blockIdOrNull)
       }
       
       event.cancelBubble = true
@@ -107,7 +103,7 @@ export const DetectionBlock = React.memo(({
         }
       }
     },
-    [block.id, index, onInteractionStart, selectedBlockId, selectedBlockIndex, setSelectedBlockId, setSelectedBlockIndex]
+    [block.id, index, onInteractionStart, selectedBlockId, selectedBlockIndex, selectBlock]
   )
 
   return (
