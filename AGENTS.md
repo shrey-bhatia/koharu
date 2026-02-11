@@ -52,7 +52,7 @@ This project follows a **test-verify-commit** cycle:
 
 Before committing ANY change:
 
-- [ ] Build succeeds: `bun tauri build -- --features=cuda`
+- [ ] Build succeeds: `pnpm tauri build -- --features=cuda`
 - [ ] App launches without errors
 - [ ] Existing features still work (don't break detection/OCR!)
 - [ ] New feature works as intended
@@ -303,16 +303,16 @@ const bitmap = await createImageBitmap(blob)
 
 ```bash
 # Development (fast, hot reload, no optimization)
-bun tauri dev
+pnpm tauri dev
 
 # Production build (slow, optimized, includes CUDA)
-bun tauri build -- --features=cuda
+pnpm tauri build -- --features=cuda
 
 # Build without bundlers (faster, for testing)
-bun tauri build -- --features=cuda --no-bundle
+pnpm tauri build -- --features=cuda --no-bundle
 
 # Frontend only (quick iteration on UI)
-cd next && bun run build
+cd next && pnpm run build
 ```
 
 ### Why Builds Are Slow
@@ -336,7 +336,7 @@ cd next && bun run build
 
 **Option 1: Use dev mode for testing**
 ```bash
-bun tauri dev  # Hot reload, skips optimization
+pnpm tauri dev  # Hot reload, skips optimization
 ```
 
 **Option 2: Install sccache (Rust compilation cache)**
@@ -355,7 +355,7 @@ lto = false  # Faster build, larger binary
 **Option 4: Build incrementally**
 ```bash
 # Only rebuild frontend
-cd next && bun run build
+cd next && pnpm run build
 
 # Only rebuild Rust (rare - backend changes less)
 cd src-tauri && cargo build --release --features=cuda
@@ -585,7 +585,7 @@ try {
 
 ```rust
 // In commands.rs
-println!("Debug: {:?}", variable);  // Prints to terminal running `bun tauri dev`
+println!("Debug: {:?}", variable);  // Prints to terminal running `pnpm tauri dev`
 
 // Or use proper logging
 log::info!("Processing {} blocks", count);
@@ -636,7 +636,7 @@ console.log('3. State after set:', useEditorStore.getState().data)
 ### Before Committing
 
 ✅ Checklist:
-- [ ] Code builds: `bun tauri build -- --features=cuda`
+- [ ] Code builds: `pnpm tauri build -- --features=cuda`
 - [ ] App runs and feature works
 - [ ] No regressions (detection and OCR still work)
 - [ ] Updated PIPELINE.md if implementation status changed

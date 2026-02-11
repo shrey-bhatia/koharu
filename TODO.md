@@ -464,7 +464,7 @@ After translation works, tackle inpainting and text rendering in order.
 
 #### Option 1: Use `--no-bundle` for testing
 ```bash
-bun tauri build -- --features=cuda --no-bundle
+pnpm tauri build -- --features=cuda --no-bundle
 # Skips MSI/NSIS creation, saves ~30 seconds
 ```
 
@@ -481,9 +481,9 @@ rustc-wrapper = "sccache"
 #### Option 3: Separate frontend/backend workflows
 ```bash
 # When only changing frontend
-cd next && bun run build
+cd next && pnpm run build
 # Then run dev mode
-bun tauri dev
+pnpm tauri dev
 ```
 
 #### Option 4: Temporarily disable LTO
@@ -499,7 +499,7 @@ lto = false  # Faster build, ~20% larger binary
 - ❌ Use debug builds for testing (10x slower runtime)
 
 ### Recommended Approach
-- Use `bun tauri dev` for rapid iteration (hot reload)
+- Use `pnpm tauri dev` for rapid iteration (hot reload)
 - Only do full builds when testing the complete pipeline
 - Install `sccache` for faster incremental builds
 

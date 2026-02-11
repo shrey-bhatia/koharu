@@ -9,7 +9,7 @@ Complete setup instructions for building and running the Koharu manga translatio
 powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
 
 # 2. Build the project
-bun tauri build -- --features=cuda
+pnpm tauri build -- --features=cuda
 
 # 3. The installer will be in target/release/bundle/
 ```
@@ -21,7 +21,7 @@ bun tauri build -- --features=cuda
 - **CUDA 12.9** — Install from https://developer.nvidia.com/cuda-toolkit
 - **cuDNN 9.11** — Install from https://developer.nvidia.com/cudnn
 - **Rust 1.85+** — Install from https://rustup.rs
-- **Bun** — Install from https://bun.sh
+- **pnpm 8.0+** — Install from https://pnpm.io or via `npm install -g pnpm`
 - **Python 3.9+** — Install from https://python.org
 - **NVIDIA GPU** — Works best with RTX/GTX series (A100/H100/L40S for production)
 
@@ -52,9 +52,9 @@ bun tauri build -- --features=cuda
 git clone https://github.com/mayocream/koharu.git
 cd koharu
 
-# Install Rust and Bun if not already installed
+# Install Rust and pnpm if not already installed
 # Then install project dependencies
-bun install
+pnpm install
 ```
 
 ### 3. Run Automated Setup
@@ -95,7 +95,7 @@ This script will:
 [4/4] Checking build tools...
   sccache: installed
   rustc: rustc 1.93.0
-  bun: 1.3.9
+  pnpm: 8.15.4
 
 === Setup Complete ===
 ```
@@ -104,13 +104,13 @@ This script will:
 
 ```bash
 # Development build (fast, with hot reload)
-bun tauri dev
+pnpm tauri dev
 
 # Production build (slower, fully optimized with CUDA)
-bun tauri build -- --features=cuda
+pnpm tauri build -- --features=cuda
 
 # Production build without installers (faster for testing)
-bun tauri build -- --features=cuda --no-bundle
+pnpm tauri build -- --features=cuda --no-bundle
 ```
 
 ## Model Files
@@ -218,7 +218,7 @@ The ONNX Runtime library is large and the linking step is memory-intensive. If y
 
 ```bash
 # Reduce link parallelism temporarily
-CARGO_BUILD_JOBS=1 bun tauri build -- --features=cuda
+CARGO_BUILD_JOBS=1 pnpm tauri build -- --features=cuda
 ```
 
 ### GPU Not Detected
@@ -239,7 +239,7 @@ If GPU isn't detected at runtime, the app will fall back to CPU mode (much slowe
 
 ## Usage
 
-1. **Launch the app** (from installer or `bun tauri dev`)
+1. **Launch the app** (from installer or `pnpm tauri dev`)
 2. **Load manga page** — Click the image icon (top-left) to open a manga page
 3. **Run detection** — Click Play next to "Detection" to detect text boxes
 4. **Run OCR** — Click Play next to "OCR" to extract Japanese text
@@ -252,12 +252,12 @@ Before contributing, please:
 1. Read [AGENTS.md](../AGENTS.md) for coding guidelines
 2. Check [TODO.md](../TODO.md) for current priorities
 3. Review [PIPELINE.md](../PIPELINE.md) for architecture overview
-4. Ensure code builds: `bun tauri build -- --features=cuda`
+4. Ensure code builds: `pnpm tauri build -- --features=cuda`
 5. Test all changes locally before submitting PR
 
 ## Development References
 
-- **Build system**: Tauri 2.x + Cargo + Bun
+- **Build system**: Tauri 2.x + Cargo + pnpm
 - **Backend**: Rust with ONNX Runtime + CUDA
 - **Frontend**: React 19 + Next.js 15 + TypeScript + Konva (canvas rendering)
 - **State management**: Zustand

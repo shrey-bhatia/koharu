@@ -135,18 +135,18 @@ if ($rustc) {
     Write-Host "  ERROR: Rust not found! Install from https://rustup.rs" -ForegroundColor Red
 }
 
-$bun = Get-Command bun -ErrorAction SilentlyContinue
-if ($bun) {
-    $ver = bun --version
-    Write-Host "  bun: $ver" -ForegroundColor Green
+$pnpm = Get-Command pnpm -ErrorAction SilentlyContinue
+if ($pnpm) {
+    $ver = pnpm --version
+    Write-Host "  pnpm: $ver" -ForegroundColor Green
 } else {
-    Write-Host "  ERROR: Bun not found! Install from https://bun.sh" -ForegroundColor Red
+    Write-Host "  ERROR: pnpm not found! Install from https://pnpm.io" -ForegroundColor Red
 }
 
 Write-Host ""
 Write-Host "=== Setup Complete ===" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Build commands:" -ForegroundColor White
-Write-Host "  Development:  bun tauri dev" -ForegroundColor Gray
-Write-Host "  Release:      bun tauri build -- --features=cuda" -ForegroundColor Gray
-Write-Host "  Quick test:   bun tauri build -- --features=cuda --no-bundle" -ForegroundColor Gray
+Write-Host "  Development:  pnpm tauri dev" -ForegroundColor Gray
+Write-Host "  Release:      pnpm tauri build -- --features=cuda" -ForegroundColor Gray
+Write-Host "  Quick test:   pnpm tauri build -- --features=cuda --no-bundle" -ForegroundColor Gray

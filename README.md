@@ -65,7 +65,7 @@ The workflow of translation consists of the following steps:
 
 ### Prerequisites
 
-- Bun
+- pnpm (8.0 or later)
 - Rust (1.85 or later)
 
 ### Instructions
@@ -80,13 +80,13 @@ The workflow of translation consists of the following steps:
 1. Install dependencies:
 
    ```bash
-   bun install
+   pnpm install
    ```
 
 1. Build the application:
 
    ```bash
-   bun tauri build
+   pnpm tauri build
    ```
 
 1. The built application will be available in the `target/release/bundle` directory.
@@ -94,7 +94,7 @@ The workflow of translation consists of the following steps:
 ### Development
 
 ```bash
-bun tauri dev
+pnpm tauri dev
 ```
 
 ## Project Documentation
@@ -152,10 +152,10 @@ Full builds take 3-7 minutes due to Rust compilation and CUDA bindings. To speed
 
 ```bash
 # Use dev mode for rapid iteration (hot reload)
-bun tauri dev
+pnpm tauri dev
 
 # Build without installers (faster testing)
-bun tauri build -- --features=cuda --no-bundle
+pnpm tauri build -- --features=cuda --no-bundle
 
 # Install sccache for Rust compilation caching
 cargo install sccache

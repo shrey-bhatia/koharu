@@ -15,7 +15,7 @@ Koharu is a manga translation application that uses AI models to detect, OCR, an
 - **State Management**: Zustand
 - **Canvas Rendering**: react-konva (Konva.js)
 - **AI Runtime**: ONNX Runtime with CUDA support
-- **Package Manager**: Bun
+- **Package Manager**: pnpm
 
 ### Backend Models (All ONNX, Downloaded from HuggingFace)
 
@@ -218,10 +218,10 @@ const store = {
 
 ```bash
 # Development (hot reload)
-bun tauri dev
+pnpm tauri dev
 
 # Production build (CUDA-enabled)
-bun tauri build -- --features=cuda
+pnpm tauri build -- --features=cuda
 ```
 
 **Build Time**: ~3-7 minutes for full release build

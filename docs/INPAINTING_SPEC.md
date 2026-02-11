@@ -1284,7 +1284,7 @@ Poisson Blending Alternative (Advanced)
  * This is a simplified version using gradient-domain blending
  */
 
-import cv from '@techstark/opencv-js' // npm install @techstark/opencv-js
+import cv from '@techstark/opencv-js' // pnpm add @techstark/opencv-js
 
 export async function compositeWithPoisson(
   baseImage: ImageBitmap,

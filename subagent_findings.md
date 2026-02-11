@@ -1534,7 +1534,7 @@ Summary of Issues by Severity
 
 Koharu Build System & Dependency Analysis
 1. Workspace Structure & Dependency Management
-Structure: Well-organized 4-crate workspace (comic-text-detector, lama, manga-ocr, src-tauri) with centralized workspace dependencies. The bun workspaces for JS ("workspaces": ["next"]) are also correctly set up.
+Structure: Well-organized 4-crate workspace (comic-text-detector, lama, manga-ocr, src-tauri) with centralized workspace dependencies. The pnpm workspaces for JS ("workspaces": ["next"]) are also correctly set up.
 
 Issues:
 
@@ -1548,7 +1548,7 @@ cuda	ort/cuda, nvml-wrapper	Default feature
 directml	ort/directml	Alternative GPU backend
 Issues:
 
-default = ["cuda"] — A plain cargo build or cargo test will require CUDA to be installed. This will break for contributors without NVIDIA hardware. Recommendation: remove cuda from defaults and always pass --features=cuda explicitly (which your build command already does: bun tauri build -- --features=cuda). Having it in both places is redundant and the default hurts portability.
+default = ["cuda"] — A plain cargo build or cargo test will require CUDA to be installed. This will break for contributors without NVIDIA hardware. Recommendation: remove cuda from defaults and always pass --features=cuda explicitly (which your build command already does: pnpm tauri build -- --features=cuda). Having it in both places is redundant and the default hurts portability.
 3. Build Optimization Settings
 # Current release profile
 codegen-units = 4   # Good balance
@@ -1560,13 +1560,13 @@ Issues:
 
 opt-level = "s" is wrong for an ML inference app. This project runs ONNX Runtime inference, image processing, and text detection. opt-level = "s" sacrifices runtime speed for smaller binaries. For ML workloads, opt-level = 3 (or even 2) would give meaningfully better performance. The binary size difference is typically 10-20%, but the speed difference can be 15-30% for compute-heavy code.
 
-The dev-release profile is defined but never referenced in any build scripts or documentation. It's a great idea but unusable until documented. Add a script: "build:fast": "cd next && bun run build && cd ../src-tauri && cargo build --profile dev-release --features=cuda".
+The dev-release profile is defined but never referenced in any build scripts or documentation. It's a great idea but unusable until documented. Add a script: "build:fast": "cd next && pnpm run build && cd ../src-tauri && cargo build --profile dev-release --features=cuda".
 
 Missing [profile.dev.package."*"] optimization: Dependencies like image, ndarray, and ort are extremely slow in debug mode. Add:
 
 [profile.dev.package."*"]
 opt-level = 2  # Optimize deps even in dev mode
-This dramatically improves bun tauri dev iteration speed at minimal compile cost.
+This dramatically improves pnpm tauri dev iteration speed at minimal compile cost.
 
 4. Dependency Versions — Critical Issues
 CRITICAL: ndarray version conflict
