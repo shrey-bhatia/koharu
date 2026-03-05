@@ -8,7 +8,7 @@ import { extractBackgroundColor } from '@/utils/color-extraction'
 import { ensureReadableContrast } from '@/utils/wcag-contrast'
 import { calculateOptimalFontSize } from '@/utils/font-sizing'
 import { calculateImprovedFontSize } from '@/utils/improved-font-sizing'
-import { createImageFromBuffer } from '@/lib/image'
+import { createImageFromBuffer, type Image } from '@/lib/image'
 import { invoke } from '@tauri-apps/api/core'
 import { fileSave } from 'browser-fs-access'
 import RenderCustomization from './render-customization'
@@ -89,8 +89,8 @@ export default function RenderPanel() {
     if (regenerateTimerRef.current) clearTimeout(regenerateTimerRef.current)
     regenerateTimerRef.current = setTimeout(() => {
       if (renderMethod === 'rectangle') {
-        console.log('[REACTIVE] Background color changed, regenerating clean base')
-        generateCleanBase()
+        console.log('[REACTIVE] Background color changed, regenerating final image')
+        regenerateFinalImage()
       }
     }, 300) // 300ms debounce
 
@@ -106,19 +106,6 @@ export default function RenderPanel() {
     } catch (err) {
       console.error('Failed to load GPU status:', err)
     }
-  }
-
-  // Get the correct base image based on render method for export
-  const getBaseImageForExport = (): ImageBitmap => {
-    if (renderMethod === 'lama' || renderMethod === 'newlama') {
-      // LaMa/NewLaMa: Use inpainted image
-      return inpaintedImage?.bitmap || image!.bitmap
-    } else if (renderMethod === 'rectangle') {
-      // Rectangle Fill: Use textless or original
-      return pipelineStages.textless?.bitmap || image!.bitmap
-    }
-    // Fallback
-    return image!.bitmap
   }
 
   const processColors = async () => {
@@ -257,13 +244,17 @@ export default function RenderPanel() {
       }
 
       setProgress(1)
+      
+      // Generate final composited image (base + rectangles + text) — same as export.
+      // This ensures preview matches export exactly.
+      const finalStage = await generateFinalImage(updated)
+
+      // Batch ALL state updates together in one synchronous block.
+      // React/Zustand will render once with the complete state.
       setTextBlocks(updated)
-
-      // Generate clean base (no text baked in) — text is rendered live by HtmlRenderLayer.
-      // Pass `updated` explicitly because setTextBlocks hasn't propagated yet (stale closure).
-      await generateCleanBase(updated)
-
-      // Switch to render tool and 'final' stage to show live preview with rendered text
+      if (finalStage) {
+        setPipelineStage('final', finalStage)
+      }
       setTool('render')
       setCurrentStage('final')
 
@@ -282,46 +273,18 @@ export default function RenderPanel() {
 
       if (!image) return
 
-      console.log('[EXPORT] Starting Canvas 2D export (matches preview)')
+      console.log('[EXPORT] Generating final image (same as preview)')
 
-      // Step 1: Get the clean base image (same as preview uses)
-      const baseImageBitmap = getBaseImageForExport()
-
-      // Step 2: Create canvas at full resolution and draw base
-      const { canvas, ctx } = createCanvas(baseImageBitmap.width, baseImageBitmap.height)
-      ctx.drawImage(baseImageBitmap, 0, 0)
-
-      // Step 3: Draw background rectangles for Rectangle Fill mode
-      if (renderMethod === 'rectangle') {
-        for (const block of textBlocks) {
-          if (!block.backgroundColor) continue
-          const bg = block.manualBgColor || block.backgroundColor
-          const x = block.xmin
-          const y = block.ymin
-          const width = block.xmax - block.xmin
-          const height = block.ymax - block.ymin
-          const radius = 5
-
-          ctx.fillStyle = `rgb(${bg.r}, ${bg.g}, ${bg.b})`
-          ctx.beginPath()
-          ctx.moveTo(x + radius, y)
-          ctx.lineTo(x + width - radius, y)
-          ctx.quadraticCurveTo(x + width, y, x + width, y + radius)
-          ctx.lineTo(x + width, y + height - radius)
-          ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height)
-          ctx.lineTo(x + radius, y + height)
-          ctx.quadraticCurveTo(x, y + height, x, y + height - radius)
-          ctx.lineTo(x, y + radius)
-          ctx.quadraticCurveTo(x, y, x + radius, y)
-          ctx.closePath()
-          ctx.fill()
-        }
+      // Use the exact same function as preview — guarantees pixel-perfect match
+      const finalStage = await generateFinalImage(textBlocks)
+      if (!finalStage) {
+        setError('Failed to generate export image')
+        return
       }
 
-      // Step 4: Draw text using Canvas 2D (same algorithm as preview's generateCleanBase family)
-      drawTextOnCanvas(ctx, textBlocks)
-
-      // Step 5: Convert to blob and save
+      // Convert bitmap to blob
+      const { canvas, ctx } = createCanvas(finalStage.bitmap.width, finalStage.bitmap.height)
+      ctx.drawImage(finalStage.bitmap, 0, 0)
       const exportBlob = await canvasToBlob(canvas, { type: 'image/png', quality: 1.0 })
 
       await fileSave(exportBlob, {
@@ -337,33 +300,121 @@ export default function RenderPanel() {
     }
   }
 
-  // Generate the clean base image (inpainted/original + background rectangles).
-  // Text is NOT drawn here — it's rendered live by HtmlRenderLayer.
-  // This means any font/color/size change is instantly reflected in the preview
-  // without re-running processColors.
-  //
-  // `blocks` parameter: pass the freshly-updated blocks when calling from processColors,
-  // because setTextBlocks hasn't propagated yet (React batches, closure is stale).
-  // When called from the debounced effect, omit it to use the current store value.
-  const generateCleanBase = async (blocks?: typeof textBlocks) => {
+  // Draw text onto a canvas using Canvas 2D API.
+  // This is the SINGLE text rendering function used by both preview and export.
+  // Ensures pixel-perfect consistency between what you see and what you get.
+  const drawTextOnCanvas = (ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, blocks: typeof textBlocks) => {
+    for (const block of blocks) {
+      if (!block.translatedText || !block.fontSize || !block.textColor) continue
+
+      const textColor = block.manualTextColor || block.textColor
+      const fontFamily = block.fontFamily || defaultFont
+      const fontWeight = block.fontWeight || 'normal'
+      const fontStretch = block.fontStretch || 'normal'
+      const letterSpacing = block.letterSpacing || 0
+      const lineHeightMultiplier = block.lineHeight || 1.2
+
+      ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
+      ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+
+      // Outline/stroke for readability
+      const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
+      const outlineColor = hasOutline ? block.appearance.sourceOutlineColor : { r: 255, g: 255, b: 255 }
+      const outlineWidth = hasOutline ? (block.appearance?.outlineWidthPx || 3) : 3
+      ctx.strokeStyle = `rgb(${outlineColor!.r}, ${outlineColor!.g}, ${outlineColor!.b})`
+      ctx.lineWidth = outlineWidth
+      ctx.lineJoin = 'round'
+
+      const boxWidth = block.xmax - block.xmin
+      const boxHeight = block.ymax - block.ymin
+      const centerX = block.xmin + boxWidth / 2
+
+      // Word wrap text
+      const words = block.translatedText.split(/\s+/)
+      const lines: string[] = []
+      let currentLine = ''
+
+      for (const word of words) {
+        const testLine = currentLine ? `${currentLine} ${word}` : word
+        const metrics = ctx.measureText(testLine)
+        if (metrics.width > boxWidth * 0.9 && currentLine) {
+          lines.push(currentLine)
+          currentLine = word
+        } else {
+          currentLine = testLine
+        }
+      }
+      if (currentLine) lines.push(currentLine)
+
+      // Character-level wrapping for CJK or long words
+      const finalLines: string[] = []
+      for (const line of lines) {
+        const lineMetrics = ctx.measureText(line)
+        if (lineMetrics.width > boxWidth * 0.95) {
+          // Break by character
+          let charLine = ''
+          for (const char of line) {
+            const testLine = charLine + char
+            if (ctx.measureText(testLine).width > boxWidth * 0.9 && charLine) {
+              finalLines.push(charLine)
+              charLine = char
+            } else {
+              charLine = testLine
+            }
+          }
+          if (charLine) finalLines.push(charLine)
+        } else {
+          finalLines.push(line)
+        }
+      }
+
+      const lineHeight = block.fontSize * lineHeightMultiplier
+      const totalTextHeight = finalLines.length * lineHeight
+      const startY = block.ymin + (boxHeight - totalTextHeight) / 2
+
+      // Draw each line with outline then fill
+      finalLines.forEach((line, lineIndex) => {
+        const lineY = startY + lineIndex * lineHeight
+
+        // Apply letter spacing manually if needed
+        if (letterSpacing !== 0) {
+          let xPos = centerX - ctx.measureText(line).width / 2
+          for (const char of line) {
+            ctx.strokeText(char, xPos, lineY)
+            ctx.fillText(char, xPos, lineY)
+            xPos += ctx.measureText(char).width + letterSpacing
+          }
+        } else {
+          ctx.strokeText(line, centerX, lineY)
+          ctx.fillText(line, centerX, lineY)
+        }
+      })
+    }
+  }
+
+  // Generate the final composited image (base + rectangles + text).
+  // This is now the SINGLE rendering function for both preview and export.
+  // Returns the generated Image object (does NOT set state).
+  const generateFinalImage = async (blocks: typeof textBlocks): Promise<Image | null> => {
     if (!image) return null
-    const blocksToUse = blocks ?? textBlocks
 
     try {
-      console.log('[CLEAN_BASE] Generating clean base (no text)')
+      console.log('[FINAL_IMAGE] Generating final composited image')
       const { canvas, ctx } = createCanvas(image.bitmap.width, image.bitmap.height)
 
       // Determine base image based on render method
       let baseImage: ImageBitmap
       if (renderMethod === 'lama' || renderMethod === 'newlama') {
         baseImage = inpaintedImage?.bitmap || image.bitmap
-        console.log(`[CLEAN_BASE] Using ${inpaintedImage ? 'inpainted' : 'original'} image for LaMa/NewLaMa`)
+        console.log(`[FINAL_IMAGE] Using ${inpaintedImage ? 'inpainted' : 'original'} image for LaMa/NewLaMa`)
       } else if (renderMethod === 'rectangle') {
         baseImage = pipelineStages.textless?.bitmap || image.bitmap
-        console.log(`[CLEAN_BASE] Using ${pipelineStages.textless ? 'textless' : 'original'} image for Rectangle Fill`)
+        console.log(`[FINAL_IMAGE] Using ${pipelineStages.textless ? 'textless' : 'original'} image for Rectangle Fill`)
       } else {
         baseImage = image.bitmap
-        console.log('[CLEAN_BASE] Using original image (fallback)')
+        console.log('[FINAL_IMAGE] Using original image (fallback)')
       }
 
       // 1. Draw base image (original or textless)
@@ -371,7 +422,7 @@ export default function RenderPanel() {
 
       // 2. Draw background rectangles ONLY for Rectangle Fill mode
       if (renderMethod === 'rectangle') {
-        for (const block of blocksToUse) {
+        for (const block of blocks) {
           if (!block.backgroundColor) continue
 
           const bg = block.manualBgColor || block.backgroundColor
@@ -397,110 +448,28 @@ export default function RenderPanel() {
         }
       }
 
-      // NO text is drawn here — HtmlRenderLayer handles live text preview.
-      // This eliminates the double-rendering bug where text appeared in both
-      // the bitmap and the HTML overlay.
+      // 3. Draw text using the shared Canvas 2D function
+      drawTextOnCanvas(ctx, blocks)
 
       const finalBlob = await canvasToBlob(canvas, { type: 'image/png', quality: 1.0 })
       const finalBuffer = await finalBlob.arrayBuffer()
       const finalStage = await createImageFromBuffer(finalBuffer)
-      setPipelineStage('final', finalStage)
 
-      console.log('[CLEAN_BASE] Clean base generated successfully')
+      console.log('[FINAL_IMAGE] Final composited image generated successfully')
       return finalStage
     } catch (err) {
-      console.error('Failed to generate clean base:', err)
+      console.error('Failed to generate final image:', err)
       return null
     }
   }
-
-  // Draw text onto a canvas for export — produces the final composited image.
-  // Uses Canvas 2D API which closely matches the HTML/CSS preview rendering.
-  const drawTextOnCanvas = (ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, blocks: typeof textBlocks) => {
-    for (const block of blocks) {
-      if (!block.translatedText || !block.fontSize || !block.textColor) continue
-
-      const textColor = block.manualTextColor || block.textColor
-      const fontFamily = block.fontFamily || defaultFont
-      const fontWeight = block.fontWeight || 'normal'
-      const fontStretch = block.fontStretch || 'normal'
-      const letterSpacing = block.letterSpacing || 0
-      const lineHeightMultiplier = block.lineHeight || 1.2
-
-      ctx.font = `${fontStretch} ${fontWeight} ${block.fontSize}px ${fontFamily}`
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-
-      const hasOutline = block.appearance?.sourceOutlineColor && block.appearance?.outlineWidthPx
-      if (hasOutline) {
-        ctx.strokeStyle = `rgb(${block.appearance.sourceOutlineColor.r}, ${block.appearance.sourceOutlineColor.g}, ${block.appearance.sourceOutlineColor.b})`
-        ctx.lineWidth = block.appearance.outlineWidthPx
-        ctx.lineJoin = 'round'
-        ctx.miterLimit = 2
-      }
-
-      ctx.fillStyle = `rgb(${textColor.r}, ${textColor.g}, ${textColor.b})`
-
-      const boxWidth = block.xmax - block.xmin
-      const boxHeight = block.ymax - block.ymin
-      const maxWidth = boxWidth * 0.9
-      const centerX = (block.xmin + block.xmax) / 2
-      const centerY = (block.ymin + block.ymax) / 2
-
-      const measureTextWithSpacing = (text: string): number => {
-        if (letterSpacing === 0) return ctx.measureText(text).width
-        let totalWidth = 0
-        for (let i = 0; i < text.length; i++) {
-          totalWidth += ctx.measureText(text[i]).width
-          if (i < text.length - 1) totalWidth += letterSpacing
-        }
-        return totalWidth
-      }
-
-      const drawTextWithSpacing = (text: string, x: number, y: number, isStroke: boolean = false) => {
-        if (letterSpacing === 0) {
-          if (isStroke) ctx.strokeText(text, x, y, maxWidth)
-          else ctx.fillText(text, x, y, maxWidth)
-          return
-        }
-        const totalWidth = measureTextWithSpacing(text)
-        let currentX = x - totalWidth / 2
-        for (let i = 0; i < text.length; i++) {
-          const char = text[i]
-          const charWidth = ctx.measureText(char).width
-          const charCenterX = currentX + charWidth / 2
-          if (isStroke) ctx.strokeText(char, charCenterX, y)
-          else ctx.fillText(char, charCenterX, y)
-          currentX += charWidth + letterSpacing
-        }
-      }
-
-      const words = block.translatedText.split(' ')
-      const lines: string[] = []
-      let currentLine = ''
-      for (const word of words) {
-        const testLine = currentLine + (currentLine ? ' ' : '') + word
-        if (measureTextWithSpacing(testLine) > maxWidth && currentLine !== '') {
-          lines.push(currentLine)
-          currentLine = word
-        } else {
-          currentLine = testLine
-        }
-      }
-      if (currentLine) lines.push(currentLine)
-
-      const lineHeight = block.fontSize * lineHeightMultiplier
-      const totalHeight = lines.length * lineHeight
-      const startY = totalHeight > boxHeight * 0.9
-        ? block.ymin + lineHeight / 2
-        : centerY - ((lines.length - 1) * lineHeight) / 2
-
-      lines.forEach((line, i) => {
-        const y = startY + i * lineHeight
-        if (hasOutline) drawTextWithSpacing(line, centerX, y, true)
-        drawTextWithSpacing(line, centerX, y, false)
-      })
+  
+  // Wrapper for reactive updates — regenerates final image when colors change
+  const regenerateFinalImage = async () => {
+    const finalStage = await generateFinalImage(textBlocks)
+    if (finalStage) {
+      setPipelineStage('final', finalStage)
     }
+    return finalStage
   }
 
   const hasProcessedColors = textBlocks.some(b => b.backgroundColor)

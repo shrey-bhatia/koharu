@@ -16,7 +16,9 @@ interface HtmlRenderLayerProps {
 export const HtmlRenderLayer = forwardRef<HtmlRenderLayerHandle, HtmlRenderLayerProps>(
   ({ stageScale, stagePos }, ref) => {
   const { tool, currentStage, textBlocks } = useEditorStore()
-  const showLayer = tool === 'render' && (currentStage === 'final' || currentStage === 'textless')
+  // Text is now baked into the final bitmap, so we don't show the HTML overlay
+  // in 'final' stage (that would cause double text). Only show for 'textless' if needed.
+  const showLayer = tool === 'render' && currentStage === 'textless'
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Expose imperative sync method so the parent canvas can push transform updates
