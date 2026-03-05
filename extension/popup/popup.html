@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Koharu</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup">
+    <header class="header">
+      <h1 class="title">Koharu</h1>
+      <span id="status-dot" class="status-dot disconnected"></span>
+    </header>
+
+    <section class="status-section">
+      <div class="status-row">
+        <span class="label">Server</span>
+        <span id="server-status" class="value">Checking…</span>
+      </div>
+      <div class="status-row">
+        <span class="label">GPU</span>
+        <span id="gpu-status" class="value">—</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Provider</span>
+        <span id="provider-status" class="value">—</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Cache</span>
+        <span id="cache-status" class="value">0 images</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Queue</span>
+        <span id="queue-status" class="value">0</span>
+      </div>
+    </section>
+
+    <section class="controls">
+      <label class="toggle-row">
+        <span>Hover to translate</span>
+        <input type="checkbox" id="toggle-hover" checked>
+        <span class="toggle-slider"></span>
+      </label>
+
+      <label class="toggle-row">
+        <span>Auto single-image pages</span>
+        <input type="checkbox" id="toggle-single">
+        <span class="toggle-slider"></span>
+      </label>
+    </section>
+
+    <section class="actions">
+      <button id="btn-translate-all" class="btn btn-primary" disabled>
+        Translate All Images
+      </button>
+      <button id="btn-clear-cache" class="btn btn-secondary">
+        Clear Cache
+      </button>
+    </section>
+
+    <footer class="footer">
+      <a href="#" id="open-options">Settings</a>
+      <span class="version" id="version-text"></span>
+    </footer>
+  </div>
+
+  <script src="../lib/constants.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

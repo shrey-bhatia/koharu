@@ -36,6 +36,8 @@ glyph_brush_layout = "0.2"  # Proper text layout with kerning for accurate measu
 wgpu = "0.19"
 nvml-wrapper = { version = "0.10", optional = true }
 reqwest = { workspace = true }
+axum = { version = "0.8", features = ["multipart"] }  # Embedded HTTP server for browser extension
+tower-http = { version = "0.6", features = ["cors", "trace"] }  # CORS + request tracing
 notify = "6.1"  # File watching for hot-reload
 tokio-stream = "0.1"  # Stream utilities for debouncing
 futures = "0.3"  # Future utilities

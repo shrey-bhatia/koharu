@@ -117,7 +117,7 @@ pub async fn detection(
     confidence_threshold: f32,
     nms_threshold: f32,
 ) -> CommandResult<DetectionResult> {
-    let state = app.state::<AppState>();
+    let state = app.state::<Arc<AppState>>();
 
     let total_start = Instant::now();
     let decode_start = Instant::now();
@@ -184,7 +184,7 @@ pub async fn detection(
 /// Kept for potential debugging/testing use.
 #[tauri::command]
 pub async fn ocr(app: AppHandle, image: Vec<u8>) -> CommandResult<Vec<String>> {
-    let state = app.state::<AppState>();
+    let state = app.state::<Arc<AppState>>();
     let command_start = Instant::now();
     let payload_bytes = image.len();
 
@@ -198,7 +198,7 @@ pub async fn ocr(app: AppHandle, image: Vec<u8>) -> CommandResult<Vec<String>> {
     );
 
     let active_key = state.active_ocr.read().await.clone();
-    let run_result = run_ocr_with_pipelines(&state, &active_key, &img, payload_bytes).await?;
+    let run_result = run_ocr_with_pipelines(&**state, &active_key, &img, payload_bytes).await?;
 
     tracing::info!(
         "[ocr] total command time {}ms (engine={}, regions={}, payload={} bytes, source=frontend)",
@@ -213,7 +213,7 @@ pub async fn ocr(app: AppHandle, image: Vec<u8>) -> CommandResult<Vec<String>> {
 
 #[tauri::command]
 pub async fn cache_ocr_image(app: AppHandle, image_png: Vec<u8>) -> CommandResult<()> {
-    let state = app.state::<AppState>();
+    let state = app.state::<Arc<AppState>>();
 
     let decode_start = Instant::now();
     let decoded =
@@ -239,7 +239,7 @@ pub async fn cache_ocr_image(app: AppHandle, image_png: Vec<u8>) -> CommandResul
 
 #[tauri::command]
 pub async fn clear_ocr_cache(app: AppHandle) -> CommandResult<()> {
-    let state = app.state::<AppState>();
+    let state = app.state::<Arc<AppState>>();
 
     let mut cache = state.ocr_image_cache.write().await;
     if cache.is_some() {
@@ -254,7 +254,7 @@ pub async fn clear_ocr_cache(app: AppHandle) -> CommandResult<()> {
 
 #[tauri::command]
 pub async fn ocr_cached_block(app: AppHandle, bbox: BBox) -> CommandResult<Vec<String>> {
-    let state = app.state::<AppState>();
+    let state = app.state::<Arc<AppState>>();
     let command_start = Instant::now();
 
     let image_arc = {
@@ -338,7 +338,7 @@ pub async fn ocr_cached_block(app: AppHandle, bbox: BBox) -> CommandResult<Vec<S
     );
 
     let active_key = state.active_ocr.read().await.clone();
-    let run_result = run_ocr_with_pipelines(&state, &active_key, &cropped, payload_bytes).await?;
+    let run_result = run_ocr_with_pipelines(&**state, &active_key, &cropped, payload_bytes).await?;
 
     tracing::info!(
         "[ocr] total command time {}ms (engine={}, regions={}, payload={} bytes, source=cache)",
@@ -353,7 +353,7 @@ pub async fn ocr_cached_block(app: AppHandle, bbox: BBox) -> CommandResult<Vec<S
 
 #[tauri::command]
 pub async fn set_active_ocr(app: AppHandle, model_key: String) -> CommandResult<()> {
-    let state = app.state::<AppState>();
+    let state = app.state::<Arc<AppState>>();
     let pipelines = state.ocr_pipelines.read().await;
 
     if !pipelines.contains_key(&model_key) {
@@ -763,7 +763,7 @@ pub async fn cache_inpainting_data(
     image_png: Vec<u8>,
     mask_png: Vec<u8>,
 ) -> CommandResult<()> {
-    let state = app.state::<AppState>();
+    let state = app.state::<Arc<AppState>>();
 
     let decoded_image =
         image::load_from_memory(&image_png).context("Failed to decode cached inpaint image")?;
@@ -794,7 +794,7 @@ pub async fn inpaint_region_cached(
     debug_mode: Option<bool>,
     config: Option<InpaintConfig>,
 ) -> CommandResult<InpaintedRegion> {
-    let state = app.state::<AppState>();
+    let state = app.state::<Arc<AppState>>();
 
     let mut cfg = config.unwrap_or_default();
     if let Some(padding) = padding {
@@ -818,14 +818,14 @@ pub async fn inpaint_region_cached(
             .ok_or_else(|| anyhow!("No cached mask. Call cache_inpainting_data first."))?
     };
 
-    let result = run_inpainting_pipeline(&app, &state, &image_arc, &mask_arc, &bbox, &cfg).await?;
+    let result = run_inpainting_pipeline(&app, &**state, &image_arc, &mask_arc, &bbox, &cfg).await?;
 
     Ok(result)
 }
 
 #[tauri::command]
 pub async fn clear_inpainting_cache(app: AppHandle) -> CommandResult<()> {
-    let state = app.state::<AppState>();
+    let state = app.state::<Arc<AppState>>();
 
     {
         let mut image_cache = state.inpaint_image_cache.write().await;
@@ -858,7 +858,7 @@ pub async fn inpaint_region(
     debug_mode: Option<bool>,      // DEPRECATED: Use config.debug_mode instead
     config: Option<InpaintConfig>, // NEW: Full configuration
 ) -> CommandResult<InpaintedRegion> {
-    let state = app.state::<AppState>();
+    let state = app.state::<Arc<AppState>>();
 
     let mut cfg = config.unwrap_or_default();
     if let Some(padding) = padding {
@@ -912,7 +912,7 @@ pub async fn inpaint_region(
             .ok_or_else(|| anyhow!("Failed to reconstruct mask buffer"))?;
     let full_mask: GrayImage = full_mask_buffer;
 
-    run_inpainting_pipeline(&app, &state, &full_image, &full_mask, &bbox, &cfg)
+    run_inpainting_pipeline(&app, &**state, &full_image, &full_mask, &bbox, &cfg)
         .await
         .map_err(Into::into)
 }
@@ -1085,7 +1085,7 @@ pub async fn get_gpu_devices() -> CommandResult<Vec<GpuDevice>> {
 
 #[tauri::command]
 pub async fn get_current_gpu_status(app: AppHandle) -> CommandResult<crate::state::GpuInitResult> {
-    let state = app.state::<AppState>();
+    let state = app.state::<Arc<AppState>>();
     let init_result = state.gpu_init_result.read().await;
     Ok(init_result.clone())
 }
@@ -1106,7 +1106,7 @@ pub async fn run_gpu_stress_test(
     iterations: Option<usize>,
     target_size: Option<u32>,
 ) -> CommandResult<StressTestResult> {
-    let state = app.state::<AppState>();
+    let state = app.state::<Arc<AppState>>();
     let iterations = iterations.unwrap_or(5);
     let target_size = target_size.unwrap_or(768);
 

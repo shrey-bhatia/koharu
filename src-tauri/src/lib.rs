@@ -4,6 +4,7 @@ mod error;
 mod hot_reload;
 mod model_package;
 mod ocr_pipeline;
+pub mod server;
 mod state;
 mod text_renderer;
 mod vertical_text_tests;
@@ -30,6 +31,7 @@ use crate::ocr_pipeline::{
     DeviceConfig, MANGA_OCR_KEY, MangaOcrPipeline, OcrPipeline, PADDLE_OCR_KEY, PaddleOcrPipeline,
 };
 use crate::state::{AppState, GpuInitResult};
+use crate::server::ServerHandle;
 
 // Read GPU preference from config file
 fn read_gpu_preference(app: &AppHandle) -> String {
@@ -381,7 +383,7 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
         );
     }
 
-    app.manage(AppState {
+    let app_state = Arc::new(AppState {
         comic_text_detector: Mutex::new(comic_text_detector),
         lama: Mutex::new(lama),
         gpu_init_result: RwLock::new(init_result),
@@ -391,6 +393,11 @@ async fn initialize(app: AppHandle) -> anyhow::Result<()> {
         inpaint_mask_cache: RwLock::new(None),
         ocr_image_cache: RwLock::new(None),
     });
+
+    app.manage(app_state);
+
+    // Store server handle (initially not running)
+    app.manage(Mutex::new(Option::<ServerHandle>::None));
 
     // Transition from splash screen to main window
     tracing::info!("Initialization complete, transitioning to main window...");
@@ -476,9 +483,93 @@ pub fn run() -> anyhow::Result<()> {
             render_and_export_image,
             cache_ocr_image,
             clear_ocr_cache,
-            ocr_cached_block
+            ocr_cached_block,
+            start_extension_server,
+            stop_extension_server,
+            get_extension_server_status
         ])
         .run(tauri::generate_context!())?;
 
     Ok(())
+}
+
+// ============================================================================
+// Extension Server Tauri Commands
+// ============================================================================
+
+#[derive(serde::Serialize)]
+struct ExtensionServerStatus {
+    running: bool,
+    port: Option<u16>,
+}
+
+#[tauri::command]
+async fn start_extension_server(
+    app: AppHandle,
+    port: Option<u16>,
+) -> error::CommandResult<ExtensionServerStatus> {
+    let port = port.unwrap_or(19284);
+
+    // Check if already running
+    let server_handle = app.state::<Mutex<Option<ServerHandle>>>();
+    let mut handle_guard = server_handle.lock().await;
+
+    if let Some(ref existing) = *handle_guard {
+        return Ok(ExtensionServerStatus {
+            running: true,
+            port: Some(existing.port()),
+        });
+    }
+
+    // AppState is managed as Arc<AppState> — clone the Arc for the server
+    let app_state: Arc<AppState> = Arc::clone(&*app.state::<Arc<AppState>>());
+
+    let handle = server::start_server(app_state, port)
+        .await
+        .map_err(|e| error::CommandError(e))?;
+
+    tracing::info!("[server] Extension server started on port {}", port);
+    *handle_guard = Some(handle);
+
+    Ok(ExtensionServerStatus {
+        running: true,
+        port: Some(port),
+    })
+}
+
+#[tauri::command]
+async fn stop_extension_server(
+    app: AppHandle,
+) -> error::CommandResult<ExtensionServerStatus> {
+    let server_handle = app.state::<Mutex<Option<ServerHandle>>>();
+    let mut handle_guard = server_handle.lock().await;
+
+    if let Some(handle) = handle_guard.take() {
+        handle.shutdown();
+        tracing::info!("[server] Extension server stopped");
+    }
+
+    Ok(ExtensionServerStatus {
+        running: false,
+        port: None,
+    })
+}
+
+#[tauri::command]
+async fn get_extension_server_status(
+    app: AppHandle,
+) -> error::CommandResult<ExtensionServerStatus> {
+    let server_handle = app.state::<Mutex<Option<ServerHandle>>>();
+    let handle_guard = server_handle.lock().await;
+
+    Ok(match &*handle_guard {
+        Some(handle) => ExtensionServerStatus {
+            running: true,
+            port: Some(handle.port()),
+        },
+        None => ExtensionServerStatus {
+            running: false,
+            port: None,
+        },
+    })
 }

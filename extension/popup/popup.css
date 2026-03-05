@@ -1,0 +1,194 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 300px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: #e2e8f0;
+  background: #1e1e2e;
+}
+
+.popup {
+  padding: 12px;
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #313244;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #cdd6f4;
+  letter-spacing: 0.5px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.connected {
+  background: #a6e3a1;
+  box-shadow: 0 0 6px rgba(166, 227, 161, 0.5);
+}
+
+.status-dot.disconnected {
+  background: #f38ba8;
+  box-shadow: 0 0 6px rgba(243, 139, 168, 0.3);
+}
+
+/* Status Section */
+.status-section {
+  margin-bottom: 12px;
+}
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.label {
+  color: #a6adc8;
+  font-size: 12px;
+}
+
+.value {
+  color: #cdd6f4;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Toggle Controls */
+.controls {
+  margin-bottom: 12px;
+  padding: 8px 0;
+  border-top: 1px solid #313244;
+  border-bottom: 1px solid #313244;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-row span:first-child {
+  font-size: 12px;
+  color: #cdd6f4;
+}
+
+.toggle-row input[type="checkbox"] {
+  display: none;
+}
+
+.toggle-slider {
+  width: 36px;
+  height: 20px;
+  background: #45475a;
+  border-radius: 10px;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #bac2de;
+  transition: transform 0.2s;
+}
+
+input[type="checkbox"]:checked + .toggle-slider {
+  background: #89b4fa;
+}
+
+input[type="checkbox"]:checked + .toggle-slider::after {
+  transform: translateX(16px);
+  background: #1e1e2e;
+}
+
+/* Action Buttons */
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.btn {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #89b4fa;
+  color: #1e1e2e;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #74c7ec;
+}
+
+.btn-secondary {
+  background: #313244;
+  color: #cdd6f4;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #45475a;
+}
+
+/* Footer */
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.footer a {
+  color: #89b4fa;
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.footer a:hover {
+  text-decoration: underline;
+}
+
+.version {
+  color: #585b70;
+  font-size: 11px;
+}

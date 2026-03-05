@@ -1,0 +1,46 @@
+{
+  "manifest_version": 2,
+  "name": "Koharu Manga Translator",
+  "version": "0.1.0",
+  "description": "Live manga translation powered by local AI models. Hover, right-click, or mark images for automatic translation.",
+  "homepage_url": "https://github.com/mayocream/koharu",
+
+  "permissions": [
+    "activeTab",
+    "storage",
+    "contextMenus",
+    "<all_urls>"
+  ],
+
+  "background": {
+    "scripts": ["lib/constants.js", "background.js"],
+    "persistent": true
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["lib/constants.js", "content.js"],
+      "css": [],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "browser_action": {
+    "default_icon": {
+      "48": "icons/icon-48.png"
+    },
+    "default_popup": "popup/popup.html",
+    "default_title": "Koharu Translator"
+  },
+
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+
+  "icons": {
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}
